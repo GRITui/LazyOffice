@@ -16,8 +16,11 @@ that track.
 | LLM backends | Claude API, or local Ollama (script properties) | **Local Ollama by default**; Claude API opt-in (Settings panel) |
 
 `engine.js` is a deliberate near-1:1 port of `Code.gs`'s LLM logic (same function names/
-shapes, same 5-model `OLLAMA_ROLE_MODELS` mapping from the First Goal doc) so the two stay
-easy to compare. `docgen.js` has no GAS equivalent — it's the one real divergence, and it
+shapes, same `OLLAMA_ROLE_MODELS` mapping from the First Goal doc) so the two stay easy to
+compare — with one intentional divergence: the Orchestrator role isn't in `OLLAMA_ROLE_MODELS`
+here, because that stage's job now belongs to the prompt auditor (see "The flow, in detail"),
+which is pinned outside the tick-box system rather than user-configurable. `docgen.js` has no
+GAS equivalent — it's the other real divergence, and it
 goes further than the webapp: the First Goal doc's mission covers documents, spreadsheets,
 *and* presentations, so this desktop track implements all three (the webapp still only does
 documents). Pick the output type in the UI; `docgen.js` writes a real `.docx` (`docx`
@@ -30,12 +33,16 @@ The chat → plan → approve loop from the webapp is extended here with two ext
 both aimed at catching mistakes before a file gets written rather than after:
 
 1. **Describe.** Type a request (and optionally attach reference files/links).
-2. **Clarify (only if needed).** Before drafting a plan, the Orchestrator judges whether the
-   request has enough detail. If something material is missing (subject, scope, audience, data
-   source, length) and it can't make a reasonable assumption, it asks 1-3 short questions
-   instead of guessing — answer them and it re-checks, repeating until it has enough (capped at
-   3 rounds, after which it drafts its best plan with reasonable assumptions rather than looping
-   forever). Most clear requests skip this step entirely.
+2. **Clarify (only if needed).** Before drafting a plan, a dedicated **prompt auditor** judges
+   whether the request has enough detail. This step always runs on one pinned local model
+   (Llama 3.1 8B Instruct — the Generalist's tag, already required, so no extra download),
+   regardless of the LLM_PROVIDER setting or any tick-box selection: it stays fast, free, and
+   available even when the rest of the pipeline is pointed at a cloud provider. If something
+   material is missing (subject, scope, audience, data source, length) and it can't make a
+   reasonable assumption, it asks 1-3 short questions instead of guessing — answer them and it
+   re-checks, repeating until it has enough (capped at 3 rounds, after which it drafts its best
+   plan with reasonable assumptions rather than looping forever). Most clear requests skip this
+   step entirely.
 3. **Review the plan.** A short plain-language description of what will be created. Approve, or
    Start Over.
 4. **Preview.** Approving doesn't write a file yet — it drafts the actual content (document
@@ -64,9 +71,10 @@ On first launch, if the provider is the local default, the app checks the local 
 - If Ollama **isn't running**, it points you to https://ollama.com/download and offers a
   Recheck button (the Ollama runtime itself is a system component — the app never installs it
   for you). You can also just switch to a cloud model in Settings.
-- If Ollama **is running**, it lists which of the five First Goal pipeline models
-  (`qwen3.5:9b`, `deepseek-r1:7b`, `phi4-mini:3.8b`, `granite4.1:8b`, `llama3.1:8b`) are
-  missing and downloads only those, streaming progress. **Models already on the device are
+- If Ollama **is running**, it lists which of the four required pipeline models
+  (`deepseek-r1:7b`, `phi4-mini:3.8b`, `granite4.1:8b`, `llama3.1:8b`) are missing and
+  downloads only those, streaming progress — `llama3.1:8b` covers both the Generalist role and
+  the prompt auditor, so there's no separate Orchestrator download. **Models already on the device are
   detected and kept** — it never re-downloads what you have. "Skip for now" dismisses the
   panel; completion is remembered (`LLM_SETUP_DONE`).
 
@@ -83,7 +91,9 @@ the `OLLAMA_URL` setting (default `http://127.0.0.1:11434`).
   nodeIntegration off).
 - `engine.js` — ported LLM logic (`callLLM`/`callClaude`/`callOllama`, attachment role
   classification, prompt building). `getPlan` is the proactive clarification loop described
-  above. `callOllama` resolves each role's ticked models (`OLLAMA_ROLE_MODEL_SELECTION`) and
+  above, powered by `callPromptAuditor` — always local, always `PROMPT_AUDITOR_MODEL`
+  (`llama3.1:8b`), never routed through `LLM_PROVIDER` or the tick boxes. `callOllama` (used by
+  every other role) resolves each role's ticked models (`OLLAMA_ROLE_MODEL_SELECTION`) and
   tries them in order, falling through on failure — the fallback chain behind the Settings tick
   boxes. No dead GAS-mock code — a desktop app always has a real backend, so the mock/
   `isGasEnv` branching from `Index.html` was dropped, not ported.
@@ -137,6 +147,12 @@ first-model-fails/second-model-succeeds fallback chain, and the `buildContent`/`
 split for all three output types (each written file inspected, not just checked for existence)
 — but **not yet driven through a real Electron window**, since this sandbox can't run one.
 Worth a real run before calling this batch done.
+
+The prompt auditor (`callPromptAuditor`, pinned to `llama3.1:8b`) was verified the same way:
+confirmed it's called even when `LLM_PROVIDER` is set to `claude` with no API key configured
+(the audit step never touches the cloud provider), and that it ignores any
+`OLLAMA_ROLE_MODEL_SELECTION` tick-box choice entirely — same untested-in-a-real-window caveat
+as above.
 
 Remaining before public distribution: code-signing + notarization (needs an Apple Developer
 ID — see below), and a formal QA pass.

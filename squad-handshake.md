@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T19:30:00Z
+Last Updated: 2026-07-09T20:05:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -103,6 +103,21 @@ been built — both tracks so far were implemented directly to prove the end-to-
   (Local-first default and full per-role Settings fields, requested in the same batch, had
   already landed in the two commits above this one.)
 
+* `desktop-app/` prompt-auditor follow-up (TSK-003, not yet committed): the Owner asked for the
+  clarification-loop stage above to run on exactly one pinned local model — Llama 3.1 8B
+  Instruct — rather than being routed through `LLM_PROVIDER`/the tick-box fallback chain like
+  the rest of the pipeline. Added `engine.callPromptAuditor`, always calling Ollama with
+  `PROMPT_AUDITOR_MODEL` (reuses the Generalist's `llama3.1:8b` tag — no extra download) and
+  ignoring the provider setting and role selection entirely; `getPlan` now calls this instead of
+  `callLLM(..., 'orchestrator')`. Consequence: the Orchestrator entry was removed from
+  `OLLAMA_ROLE_MODELS` (no longer has a call site, so it's gone from the Settings tick-box grid,
+  which is data-driven from that map) and `setup-llm.js`'s required-download list dropped
+  `qwen3.5:9b` — first-run setup now pulls 4 models instead of 5. Renderer copy in the
+  clarify/plan cards now names the prompt auditor explicitly. Verified: confirmed the auditor
+  is still called even with `LLM_PROVIDER='claude'` and no API key set, and that ticking a
+  different model for another role has no effect on which model the auditor uses — same
+  not-yet-run-in-a-real-window caveat as the batch above.
+
 ## Blockers & QA Failures
 
 * RESOLVED (2026-07-09): TSK-003 now runs in a real Electron window. `npm start` and the
@@ -128,6 +143,7 @@ been built — both tracks so far were implemented directly to prove the end-to-
   fallback chain, and `buildContent`/`createOutput` for all 3 output types with each written
   file inspected) — not yet driven through a real Electron window. Needs the same kind of CDP
   pass the base flow got before this is called done.
+* Same caveat for the prompt-auditor follow-up directly below.
 
 ## Cross-Squad Requests
 

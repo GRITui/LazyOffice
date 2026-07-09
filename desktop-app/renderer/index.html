@@ -391,7 +391,7 @@
 
     <div id="clarify-box" class="card">
       <p class="card-label">A few quick questions</p>
-      <p class="roles-hint">Your request could use a bit more detail before I draft a plan.</p>
+      <p class="roles-hint">The local prompt auditor (Llama 3.1 8B Instruct) needs a bit more detail before it can draft a plan.</p>
       <div id="clarify-questions"></div>
       <div class="actions">
         <button id="clarify-submit-btn" onclick="submitClarifications()">Submit &amp; Continue</button>
@@ -401,6 +401,7 @@
 
     <div id="plan-box" class="card">
       <p class="card-label">Proposed plan</p>
+      <p class="roles-hint" style="margin-top:-6px;">Reviewed locally by the prompt auditor (Llama 3.1 8B Instruct) before this reaches your configured backend.</p>
       <p id="plan-text"></p>
       <div class="actions">
         <button id="approve-btn" onclick="approve()">Approve &amp; Preview</button>

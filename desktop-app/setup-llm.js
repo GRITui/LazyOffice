@@ -1,6 +1,8 @@
 // First-run local-LLM setup. LazyOffice is local-first (see engine.js): the
-// five First Goal pipeline roles run on a local Ollama server. This module
-// detects what's already installed and pulls only the missing models — it
+// pipeline roles run on a local Ollama server (plus a pinned prompt-auditor
+// model that isn't user-configurable — see engine.js's PROMPT_AUDITOR_MODEL).
+// This module detects what's already installed and pulls only the missing
+// required models — it
 // never blindly re-downloads, and it never installs the Ollama runtime itself
 // (that's a system component; if it's absent the UI guides the user to it).
 //
@@ -10,9 +12,12 @@
 const http = require('http');
 const { URL } = require('url');
 
-// Same five models/tags as engine.js's OLLAMA_ROLE_MODELS, in pipeline order.
+// Same models/tags as engine.js's OLLAMA_ROLE_MODELS, in pipeline order. No
+// Orchestrator entry: that role's job now runs on the prompt auditor (see
+// engine.js's PROMPT_AUDITOR_MODEL), which is pinned to llama3.1:8b — already
+// required below for the Generalist — rather than a separate qwen3.5:9b
+// download.
 const REQUIRED_MODELS = [
-  { tag: 'qwen3.5:9b', role: 'Orchestrator' },
   { tag: 'deepseek-r1:7b', role: 'Planner' },
   { tag: 'phi4-mini:3.8b', role: 'Syntax Enforcer' },
   { tag: 'granite4.1:8b', role: 'Code Engine' },

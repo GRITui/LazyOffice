@@ -20,16 +20,27 @@ const LLM_PROVIDER_DEFAULT = 'ollama';
 const OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
 const OLLAMA_MODEL_DEFAULT = 'llama3.1:8b';
 
-// The First Goal doc's 5-agent pipeline, same mapping as Code.gs. roleLabel is
-// the friendly pipeline-stage name (Settings groups tick boxes by it); label/
-// ollamaTag describe that role's own recommended model.
+// The First Goal doc's pipeline, same mapping as Code.gs, minus the
+// Orchestrator: that stage's job (figure out exactly what the user needs
+// before handing off to this pipeline) is now the prompt auditor below — a
+// single pinned local model, not a per-role tick-box choice — so Qwen3.5-9B
+// is no longer downloaded or configurable here. roleLabel is the friendly
+// pipeline-stage name (Settings groups tick boxes by it); label/ollamaTag
+// describe that role's own recommended model.
 const OLLAMA_ROLE_MODELS = {
-  orchestrator: { roleLabel: 'Orchestrator', label: 'Qwen3.5-9B', ollamaTag: 'qwen3.5:9b' },
   planner: { roleLabel: 'Planner', label: 'DeepSeek-R1-Distill-Qwen-7B', ollamaTag: 'deepseek-r1:7b' },
   syntax_enforcer: { roleLabel: 'Syntax Enforcer', label: 'Phi-4-mini (3.8B)', ollamaTag: 'phi4-mini:3.8b' },
   code_engine: { roleLabel: 'Code Engine', label: 'IBM Granite 4.1 8B', ollamaTag: 'granite4.1:8b' },
   generalist: { roleLabel: 'Generalist', label: 'Llama 3.1 8B Instruct', ollamaTag: 'llama3.1:8b' }
 };
+
+// The prompt auditor: a single pinned local model that decides exactly what
+// the user needs (see getPlan) before anything "handshakes" with the backend
+// pipeline above. Always runs on Ollama with this one model, regardless of
+// LLM_PROVIDER or any tick-box selection — reuses the Generalist's tag
+// (already required, so this adds no extra download) rather than a separate
+// model.
+const PROMPT_AUDITOR_MODEL = OLLAMA_ROLE_MODELS.generalist.ollamaTag;
 
 async function callLLM(systemPrompt, userPrompt, role) {
   const provider = ScriptProperties.getProperty('LLM_PROVIDER') || LLM_PROVIDER_DEFAULT;
@@ -126,6 +137,21 @@ async function callOllama(systemPrompt, userPrompt, role) {
     }
   }
   throw lastErr || new Error('No Ollama model configured for role "' + role + '".');
+}
+
+// Always local, always this one model — see PROMPT_AUDITOR_MODEL. Ignores
+// LLM_PROVIDER and OLLAMA_ROLE_MODEL_SELECTION entirely: the audit step
+// should stay fast, free, and available even when the rest of the pipeline
+// is pointed at a cloud provider.
+async function callPromptAuditor(systemPrompt, userPrompt) {
+  const url = ScriptProperties.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
+  try {
+    return await callOllamaModel(url, PROMPT_AUDITOR_MODEL, systemPrompt, userPrompt);
+  } catch (err) {
+    throw new Error('Prompt auditor (local ' + PROMPT_AUDITOR_MODEL + ') is unreachable at ' + url +
+      '. This step always runs locally regardless of your provider setting — install/start ' +
+      'Ollama and pull ' + PROMPT_AUDITOR_MODEL + ', then try again. (' + err.message + ')');
+  }
 }
 
 const MAX_INLINE_TEXT_CHARS = 4000;
@@ -247,9 +273,9 @@ function extractJson(text) {
 }
 
 // Circuit breaker on the clarification loop, mirroring the Squad Setup doc's
-// 3-strikes convention: after this many rounds the Orchestrator is told to
-// stop asking and just draft its best plan, so a request the model keeps
-// finding "unclear" can never trap the user in an endless Q&A loop.
+// 3-strikes convention: after this many rounds the prompt auditor is told to
+// stop asking and just draft its best plan, so a request it keeps finding
+// "unclear" can never trap the user in an endless Q&A loop.
 const MAX_CLARIFICATION_ROUNDS = 3;
 
 function buildClarificationContext(clarifications) {
@@ -260,22 +286,28 @@ function buildClarificationContext(clarifications) {
 }
 
 /**
- * Stage 1 of the HITL flow. Before drafting a plan, the Orchestrator first
- * judges whether the request has enough detail to plan confidently for the
- * chosen output type — if not, it asks a short list of clarifying questions
- * instead of guessing. The renderer collects the user's answers and calls
- * this again with the growing `clarifications` history; that repeats until
- * the model returns a plan, or MAX_CLARIFICATION_ROUNDS is hit and it's told
- * to stop asking and draft its best plan with reasonable assumptions.
+ * Stage 1 of the HITL flow — the prompt auditor (see PROMPT_AUDITOR_MODEL;
+ * always local Llama 3.1 8B Instruct, never the cloud provider or a
+ * tick-boxed model). Before drafting a plan, it first judges whether the
+ * request has enough detail to plan confidently for the chosen output type —
+ * if not, it asks a short list of clarifying questions instead of guessing.
+ * The renderer collects the user's answers and calls this again with the
+ * growing `clarifications` history; that repeats until it returns a plan, or
+ * MAX_CLARIFICATION_ROUNDS is hit and it's told to stop asking and draft its
+ * best plan with reasonable assumptions. Only once this resolves to "ready"
+ * does the request go on to handshake with the backend pipeline (buildContent
+ * in docgen.js) that actually drafts the output — that stage still runs on
+ * whatever provider/model the user has configured.
  * Resolves to { status: 'ready', plan } or
  * { status: 'needs_clarification', questions: [...] }.
  */
 async function getPlan(userRequest, attachments, outputType, clarifications) {
   const describe = OUTPUT_TYPE_COPY[outputType] || OUTPUT_TYPE_COPY.document;
   const forceReady = (clarifications || []).length >= MAX_CLARIFICATION_ROUNDS;
-  const systemPrompt = 'You are a planning assistant for an office document generator. Given a ' +
-    'user\'s request and any reference material, first judge whether you have enough detail to ' +
-    'confidently plan ' + describe + '. ' +
+  const systemPrompt = 'You are the prompt auditor for an office document generator: your job ' +
+    'is to pin down exactly what the user needs before it is handed off to the system that ' +
+    'drafts the output. Given a user\'s request and any reference material, first judge ' +
+    'whether you have enough detail to confidently plan ' + describe + '. ' +
     (forceReady
       ? 'You have already asked enough clarifying questions for this request — draft your best ' +
         'plan now using reasonable assumptions for anything still unclear. Do not ask further ' +
@@ -293,7 +325,7 @@ async function getPlan(userRequest, attachments, outputType, clarifications) {
     '"questions": [string, ...]}. No markdown, no code fences, no commentary — just the JSON ' +
     'object.';
   const userPrompt = userRequest + buildAttachmentContext(attachments) + buildClarificationContext(clarifications);
-  const raw = await callLLM(systemPrompt, userPrompt, 'orchestrator');
+  const raw = await callPromptAuditor(systemPrompt, userPrompt);
   const parsed = extractJson(raw);
 
   if (parsed && parsed.status === 'needs_clarification' && Array.isArray(parsed.questions) &&
@@ -313,9 +345,11 @@ module.exports = {
   callLLM,
   callClaude,
   callOllama,
+  callPromptAuditor,
   buildAttachmentContext,
   classifyAttachments,
   parseAttachmentRoles,
   getPlan,
-  OLLAMA_ROLE_MODELS
+  OLLAMA_ROLE_MODELS,
+  PROMPT_AUDITOR_MODEL
 };
