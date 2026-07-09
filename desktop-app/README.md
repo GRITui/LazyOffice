@@ -60,15 +60,16 @@ the file lands in `~/Documents/LazyOffice/`.
 
 ## Status
 
-Scaffolded and logic-tested (the Claude and Ollama code paths, and real `.docx`/`.xlsx`/
-`.pptx` generation for all three output types, were verified against local stand-in
-servers — see commit history for details; each generated file was unzipped and its actual
-content checked, not just its existence). **Now confirmed to launch in a real Electron
-window** and **packaged into a `.app`** via `electron-builder` (see Building below); the
-window renders and the renderer/IPC/Settings layer loads without error. Not yet exercised:
-driving a full request → plan → approve → file generation *through the GUI* on a machine with
-a real API key or Ollama configured (the code paths behind it are verified headlessly, but
-the end-to-end click-through hasn't been done).
+Runs in a real Electron window and is **packaged into a `.app`** (with a custom icon) via
+`electron-builder` (see Building below). The full flow has been **driven end-to-end through
+the real renderer** — for each of the three output types, a request → plan (Get Plan) →
+approve (Approve & Generate) → file-write cycle was exercised against a local stand-in LLM,
+and each resulting `.docx`/`.xlsx`/`.pptx` was opened and its content verified (real
+headings/rows/slides, and a native chart in the deck), not just its existence. The API key is
+encrypted at rest via the OS keychain (Electron `safeStorage`), not stored in plaintext.
+
+Remaining before public distribution: code-signing + notarization (needs an Apple Developer
+ID — see below), and a formal QA pass.
 
 ## Building a macOS app
 
@@ -99,12 +100,25 @@ printf 'Electron.app/Contents/MacOS/Electron' > node_modules/electron/path.txt
 
 (`electron-builder`'s own extractor is unaffected — `npm run pack`/`dist` work fine.)
 
+## Code-signing & notarization
+
+The build is currently **unsigned** (`electron-builder` reports "0 identities found"), so
+macOS Gatekeeper warns on first open (right-click → Open, or
+`xattr -dr com.apple.quarantine <app>`). To sign + notarize for real distribution you need an
+Apple Developer ID:
+
+1. Enroll in the Apple Developer Program and install a "Developer ID Application" certificate
+   in your login keychain.
+2. `electron-builder` auto-detects the identity; for notarization add an
+   `afterSign` notarize hook (`@electron/notarize`) with an app-specific password or an App
+   Store Connect API key, plus `"hardenedRuntime": true` under `build.mac`.
+
+Everything else (icon, packaging, entitlements-free runtime) is already in place — only the
+cert + notarize credentials are missing, and those are owner-provided.
+
 ## Known gaps
 
-- Unsigned build only — no code-signing/notarization yet (needed for distribution outside your
-  own machine); no app icon (uses the default Electron icon).
-- Full GUI click-through (request → plan → approve → file) not yet driven on a machine with a
-  live API key; only the underlying code paths are verified headlessly.
-- No automated tests beyond the manual verification during development.
-- Settings are stored in plaintext JSON (`config.json` in the OS user-data dir) — fine for a
-  prototype, not for a shipped app holding a real API key.
+- Unsigned build (see above) — the only blocker to distributing outside your own machine.
+- No automated test suite yet — verification so far is manual + the end-to-end renderer drive
+  described under Status.
+- No formal QA-Squad pass has run against the app.

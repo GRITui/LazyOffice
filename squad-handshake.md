@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T16:32:28Z
+Last Updated: 2026-07-09T16:49:05Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -40,11 +40,21 @@ been built — both tracks so far were implemented directly to prove the end-to-
   now runs as a JSON-repair step when the Code Engine's output fails to parse; Generalist
   (Llama 3.1 8B) drafts the delivery summary now shown in the result card. All 5 First Goal
   doc roles have a real call site (previously 3 of 5).
-* `desktop-app/` first real Electron run + P1 fixes (TSK-003, same branch, not yet committed):
-  confirmed the app launches (`npm start` and packaged `.app`); added the missing
+* `desktop-app/` first real Electron run + P1 fixes (TSK-003, committed 3787e8c): confirmed
+  the app launches (`npm start` and packaged `.app`); added the missing
   `OLLAMA_SYNTAX_MODEL`/`OLLAMA_GENERALIST_MODEL` Settings fields so all 5 roles are
   configurable; added `electron-builder` packaging (`npm run pack`/`dist`). Documented the
   Node-26 `extract-zip` install gotcha in the README.
+* `desktop-app/` end-to-end GUI verification (TSK-003): drove the real renderer over Electron's
+  remote-debugging port (CDP) for all 3 output types — Get Plan → Approve & Generate → file —
+  each producing a valid OOXML file on disk (docx headings/body, xlsx headers+rows, pptx with
+  a native chart). Full stack exercised: DOM → preload → IPC → engine → docgen → disk.
+* `desktop-app/` polish (TSK-003, not yet committed): added a custom app icon
+  (`build/icon.icns` + generator in `build/make_icon.py`), wired via `build.mac.icon`;
+  hardened the API key at rest — `config-store.js` now encrypts `ANTHROPIC_API_KEY` via
+  Electron `safeStorage` (OS keychain), transparent to callers, with plaintext fallback when
+  encryption is unavailable (verified with an 8-assertion headless Electron test). README now
+  documents the code-signing/notarization steps that remain (owner-provided Apple cert).
 
 ## Blockers & QA Failures
 
@@ -58,9 +68,11 @@ been built — both tracks so far were implemented directly to prove the end-to-
   roles — `OLLAMA_SYNTAX_MODEL` and `OLLAMA_GENERALIST_MODEL` were called in `docgen.js` but
   had no UI/IPC field (added to `main.js` `SETTINGS_KEYS` and `renderer/index.html`);
   (2) `electron-builder` packaging config added to `package.json` (`npm run pack`/`dist`).
-* Still open before TSK-003 is "done": full GUI click-through (request → plan → approve →
-  file) on a machine with a live API key/Ollama has not been driven — only the underlying
-  code paths are verified headlessly. Build is unsigned with the default Electron icon.
+* RESOLVED (2026-07-09): the full GUI flow (request → Get Plan → Approve & Generate → file)
+  is now driven end-to-end for all 3 output types via CDP against the real renderer; icon and
+  at-rest key encryption added. Only two things remain before TSK-003 is fully "done":
+  (1) code-signing + notarization, blocked on an owner-provided Apple Developer ID cert
+  (steps documented in `desktop-app/README.md`); (2) a formal QA-Squad pass.
 * No QA-Squad pass has run against either track yet.
 
 ## Cross-Squad Requests
