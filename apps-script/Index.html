@@ -3,88 +3,271 @@
   <head>
     <base target="_top">
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LazyOffice — Document Assistant</title>
     <style>
-      body { font-family: Arial, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #202124; }
-      h1 { font-size: 20px; }
-      textarea { width: 100%; box-sizing: border-box; padding: 8px; font-size: 14px; font-family: inherit; }
-      button { padding: 8px 16px; font-size: 14px; cursor: pointer; margin-top: 8px; }
-      button:disabled { cursor: default; opacity: 0.6; }
-      #plan-box, #result-box { margin-top: 16px; padding: 12px; border: 1px solid #ccc; border-radius: 6px; display: none; }
-      #status { margin-top: 8px; font-style: italic; color: #555; min-height: 1.2em; }
-      a.doc-link { font-weight: bold; word-break: break-all; }
+      :root {
+        --bg: #f7f8fa;
+        --surface: #ffffff;
+        --border: #e0e3e8;
+        --text: #1f2430;
+        --text-muted: #5f6675;
+        --accent: #3457d5;
+        --accent-hover: #2941ac;
+        --accent-text: #ffffff;
+        --error-bg: #fdecea;
+        --error-border: #f3c2bd;
+        --error-text: #9c2a1f;
+        --success-text: #1a7f4e;
+        --mock-bg: #fff6da;
+        --mock-border: #f0dd9c;
+        --mock-text: #7a5c00;
+        --radius: 10px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14161c;
+          --surface: #1d2029;
+          --border: #2c303c;
+          --text: #eceef2;
+          --text-muted: #9aa0ae;
+          --accent: #6a86ff;
+          --accent-hover: #8299ff;
+          --accent-text: #0c0e14;
+          --error-bg: #3a1f1c;
+          --error-border: #6b332c;
+          --error-text: #ff9a8c;
+          --success-text: #5fd996;
+          --mock-bg: #332b13;
+          --mock-border: #665423;
+          --mock-text: #e4c65f;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        max-width: 640px;
+        margin: 40px auto;
+        padding: 0 16px;
+        color: var(--text);
+        background: var(--bg);
+      }
+      h1 { font-size: 21px; margin-bottom: 4px; }
+      .subtitle { color: var(--text-muted); font-size: 14px; margin-top: 0; }
+      .mock-banner {
+        display: none;
+        background: var(--mock-bg);
+        border: 1px solid var(--mock-border);
+        color: var(--mock-text);
+        border-radius: var(--radius);
+        padding: 8px 12px;
+        font-size: 13px;
+        margin-bottom: 16px;
+      }
+      textarea {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 14px;
+        font-family: inherit;
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        resize: vertical;
+      }
+      textarea:focus, button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .actions { margin-top: 10px; display: flex; gap: 8px; }
+      button {
+        padding: 9px 18px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        border-radius: var(--radius);
+        background: var(--accent);
+        color: var(--accent-text);
+        transition: background 0.15s ease;
+      }
+      button:hover:not(:disabled) { background: var(--accent-hover); }
+      button:disabled { cursor: default; opacity: 0.55; }
+      button.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      button.secondary:hover:not(:disabled) { background: var(--surface); }
+      .card {
+        margin-top: 18px;
+        padding: 16px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        display: none;
+      }
+      .card-label {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin: 0 0 8px;
+      }
+      #plan-text { margin: 0 0 12px; line-height: 1.5; white-space: pre-wrap; }
+      #result-box .card-label { color: var(--success-text); }
+      a.doc-link {
+        font-weight: 600;
+        word-break: break-all;
+        color: var(--accent);
+      }
+      #status {
+        margin-top: 14px;
+        font-size: 13px;
+        color: var(--text-muted);
+        min-height: 1.2em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #status.error { color: var(--error-text); }
+      .spinner {
+        width: 13px;
+        height: 13px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        display: none;
+        animation: spin 0.7s linear infinite;
+      }
+      .spinner.visible { display: inline-block; }
+      @keyframes spin { to { transform: rotate(360deg); } }
     </style>
   </head>
   <body>
     <h1>LazyOffice — Document Assistant</h1>
-    <p>Describe the document you want, review the plan, then approve to generate a real Google Doc.</p>
+    <p class="subtitle">Describe the document you want, review the plan, then approve to generate a real Google Doc.</p>
+    <div class="mock-banner" id="mock-banner">
+      Preview mode — running outside Apps Script, so responses below are mocked. Deploy as a
+      GAS Web App to connect the real engine (<code>getPlan</code> / <code>generateDoc</code>).
+    </div>
 
     <textarea id="request" rows="3" placeholder="e.g. Generate a one-page project status update for the LazyOffice MVP"></textarea>
-    <br>
-    <button id="plan-btn" onclick="requestPlan()">Get Plan</button>
+    <div class="actions">
+      <button id="plan-btn" onclick="requestPlan()">Get Plan</button>
+    </div>
 
-    <div id="plan-box">
-      <strong>Proposed plan:</strong>
+    <div id="plan-box" class="card">
+      <p class="card-label">Proposed plan</p>
       <p id="plan-text"></p>
-      <button id="approve-btn" onclick="approve()">Approve &amp; Generate</button>
+      <div class="actions">
+        <button id="approve-btn" onclick="approve()">Approve &amp; Generate</button>
+        <button class="secondary" onclick="resetFlow()">Start Over</button>
+      </div>
     </div>
 
-    <div id="result-box">
-      <strong>Done:</strong>
+    <div id="result-box" class="card">
+      <p class="card-label">Document ready</p>
       <p><a class="doc-link" id="doc-link" href="#" target="_blank"></a></p>
+      <div class="actions">
+        <button class="secondary" onclick="resetFlow()">Create Another</button>
+      </div>
     </div>
 
-    <div id="status"></div>
+    <div id="status">
+      <span class="spinner" id="spinner"></span>
+      <span id="status-text"></span>
+    </div>
 
     <script>
       var currentRequest = '';
+      var isGasEnv = (typeof google !== 'undefined' && !!google.script && !!google.script.run);
 
-      function setStatus(msg) {
-        document.getElementById('status').textContent = msg || '';
+      if (!isGasEnv) {
+        document.getElementById('mock-banner').style.display = 'block';
+      }
+
+      // Local preview stand-in, only used outside the Apps Script runtime.
+      // Mirrors the real getPlan/generateDoc signatures in Code.gs so this
+      // file needs no changes once deployed as a GAS Web App.
+      var mockServer = {
+        getPlan: function (request, onSuccess) {
+          setTimeout(function () {
+            onSuccess('I will create a Google Doc titled "Draft: ' + request.slice(0, 60) +
+              '" with an introduction, 2-3 supporting sections, and a brief summary. ' +
+              '(mock response — no LLM call made)');
+          }, 700);
+        },
+        generateDoc: function (request, onSuccess) {
+          setTimeout(function () {
+            onSuccess('https://docs.google.com/document/d/MOCK_PREVIEW_ONLY/edit');
+          }, 700);
+        }
+      };
+
+      function callServer(fnName, arg, onSuccess, onError) {
+        if (isGasEnv) {
+          google.script.run
+            .withSuccessHandler(onSuccess)
+            .withFailureHandler(onError)
+            [fnName](arg);
+        } else {
+          mockServer[fnName](arg, onSuccess, onError);
+        }
+      }
+
+      function setStatus(msg, isError, loading) {
+        document.getElementById('status-text').textContent = msg || '';
+        document.getElementById('status').classList.toggle('error', !!isError);
+        document.getElementById('spinner').classList.toggle('visible', !!loading);
+      }
+
+      function resetFlow() {
+        currentRequest = '';
+        document.getElementById('request').value = '';
+        document.getElementById('plan-box').style.display = 'none';
+        document.getElementById('result-box').style.display = 'none';
+        setStatus('');
       }
 
       function requestPlan() {
         currentRequest = document.getElementById('request').value.trim();
         if (!currentRequest) {
-          setStatus('Enter a request first.');
+          setStatus('Enter a request first.', true, false);
           return;
         }
         document.getElementById('plan-box').style.display = 'none';
         document.getElementById('result-box').style.display = 'none';
-        setStatus('Thinking through a plan...');
+        setStatus('Thinking through a plan...', false, true);
         document.getElementById('plan-btn').disabled = true;
 
-        google.script.run
-          .withSuccessHandler(function (plan) {
-            document.getElementById('plan-text').textContent = plan;
-            document.getElementById('plan-box').style.display = 'block';
-            setStatus('');
-            document.getElementById('plan-btn').disabled = false;
-          })
-          .withFailureHandler(function (err) {
-            setStatus('Error: ' + err.message);
-            document.getElementById('plan-btn').disabled = false;
-          })
-          .getPlan(currentRequest);
+        callServer('getPlan', currentRequest, function (plan) {
+          document.getElementById('plan-text').textContent = plan;
+          document.getElementById('plan-box').style.display = 'block';
+          setStatus('', false, false);
+          document.getElementById('plan-btn').disabled = false;
+        }, function (err) {
+          setStatus('Error: ' + err.message, true, false);
+          document.getElementById('plan-btn').disabled = false;
+        });
       }
 
       function approve() {
-        setStatus('Generating your document...');
+        setStatus('Generating your document...', false, true);
         document.getElementById('approve-btn').disabled = true;
 
-        google.script.run
-          .withSuccessHandler(function (url) {
-            var link = document.getElementById('doc-link');
-            link.href = url;
-            link.textContent = url;
-            document.getElementById('result-box').style.display = 'block';
-            setStatus('');
-            document.getElementById('approve-btn').disabled = false;
-          })
-          .withFailureHandler(function (err) {
-            setStatus('Error: ' + err.message);
-            document.getElementById('approve-btn').disabled = false;
-          })
-          .generateDoc(currentRequest);
+        callServer('generateDoc', currentRequest, function (url) {
+          var link = document.getElementById('doc-link');
+          link.href = url;
+          link.textContent = url;
+          document.getElementById('result-box').style.display = 'block';
+          setStatus('', false, false);
+          document.getElementById('approve-btn').disabled = false;
+        }, function (err) {
+          setStatus('Error: ' + err.message, true, false);
+          document.getElementById('approve-btn').disabled = false;
+        });
       }
     </script>
   </body>
