@@ -249,16 +249,7 @@
         border-radius: var(--radius);
       }
       .settings-hint { font-size: 12px; color: var(--text-muted); margin: 2px 0 0; }
-      .role-model-role { margin-top: 14px; border: none; padding: 0; }
-      .role-model-role legend {
-        font-size: 12px; font-weight: 700; color: var(--text); padding: 0; margin-bottom: 4px;
-      }
-      .role-model-options { display: flex; flex-wrap: wrap; gap: 6px 14px; }
-      .role-model-options label {
-        display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 400;
-        color: var(--text); margin: 0; text-transform: none; letter-spacing: normal;
-      }
-      .role-model-options input[type="checkbox"] { width: auto; margin: 0; }
+      .settings-hint code { font-family: ui-monospace, "SF Mono", "Roboto Mono", monospace; }
       #clarify-box .settings-field label { text-transform: none; font-weight: 600; font-size: 12.5px; }
       #preview-box { max-height: 420px; overflow-y: auto; }
       #preview-body h3 { font-size: 14px; margin: 12px 0 4px; }
@@ -332,24 +323,26 @@
     <div id="settings-box" class="card">
       <p class="card-label">Settings</p>
       <div class="settings-field">
-        <label for="setting-provider">LLM provider</label>
+        <label for="setting-provider">Backend</label>
         <select id="setting-provider">
-          <option value="claude">Claude API</option>
-          <option value="ollama">Local Ollama</option>
+          <option value="ollama">Local Ollama (Llama 3.1 8B Instruct)</option>
+          <option value="claude-cli">Claude CLI</option>
         </select>
-      </div>
-      <div class="settings-field">
-        <label for="setting-api-key">Anthropic API key</label>
-        <input type="password" id="setting-api-key" placeholder="sk-ant-...">
       </div>
       <div class="settings-field">
         <label for="setting-ollama-url">Ollama URL</label>
         <input type="text" id="setting-ollama-url" placeholder="http://localhost:11434/v1/chat/completions">
       </div>
-      <p class="field-label" style="margin-top:16px;">Local models per role</p>
-      <p class="settings-hint">Tick a model for each pipeline role. Tick more than one to set a fallback chain — if the first fails (e.g. not pulled yet), the next ticked model is tried.</p>
-      <div id="role-model-grid"></div>
-      <p class="settings-hint">Only used when the provider above is "Local Ollama".</p>
+      <p class="settings-hint">Used when the backend above is "Local Ollama". The prompt-audit step (see the plan card) always uses this regardless of which backend is selected.</p>
+      <div class="settings-field">
+        <label for="setting-claude-cli-path">Claude CLI path</label>
+        <input type="text" id="setting-claude-cli-path" placeholder="claude">
+      </div>
+      <div class="settings-field">
+        <label for="setting-claude-cli-model">Claude CLI model</label>
+        <input type="text" id="setting-claude-cli-model" placeholder="claude-sonnet-5">
+      </div>
+      <p class="settings-hint">Used when the backend above is "Claude CLI" — shells out to a locally-installed <code>claude</code> CLI instead of a separately-managed API key. Requires the CLI installed and logged in on this machine.</p>
       <div class="actions">
         <button id="save-settings-btn" onclick="saveSettings()">Save</button>
         <button class="secondary" onclick="toggleSettings()">Close</button>
@@ -441,7 +434,6 @@
       var MAX_FILE_BYTES = 4 * 1024 * 1024;
       var clarificationHistory = []; // [{question, answer}, ...] across all rounds so far
       var currentParsed = null; // content returned by buildContent, shown in the preview card
-      var roleModelsCache = null; // { role: {roleLabel, label, ollamaTag} }, fetched once
 
       var OUTPUT_TYPES = {
         document: { label: 'Document', noun: 'document', extension: '.docx', placeholder: 'e.g. Generate a one-page project status update for the LazyOffice MVP' },
@@ -880,89 +872,22 @@
         if (opening) loadSettings();
       }
 
-      // Every role offers every model in the pipeline as a tick box — any model
-      // can serve any role, and ticking several sets a fallback chain (see
-      // engine.js's resolveOllamaCandidates). roleModels comes from the main
-      // process (source of truth: engine.js's OLLAMA_ROLE_MODELS) so this list
-      // and the defaults never drift out of sync with the backend.
-      function renderRoleModelGrid(roleModels, selection) {
-        var modelOptions = Object.keys(roleModels).map(function (r) {
-          return { tag: roleModels[r].ollamaTag, label: roleModels[r].label };
-        });
-        var grid = document.getElementById('role-model-grid');
-        grid.innerHTML = '';
-        Object.keys(roleModels).forEach(function (role) {
-          var fieldset = document.createElement('fieldset');
-          fieldset.className = 'role-model-role';
-          var legend = document.createElement('legend');
-          legend.textContent = roleModels[role].roleLabel + ' (default: ' + roleModels[role].label + ')';
-          fieldset.appendChild(legend);
-          var optionsWrap = document.createElement('div');
-          optionsWrap.className = 'role-model-options';
-          var ticked = (selection && Array.isArray(selection[role]) && selection[role].length)
-            ? selection[role]
-            : [roleModels[role].ollamaTag];
-          modelOptions.forEach(function (opt) {
-            var label = document.createElement('label');
-            var input = document.createElement('input');
-            input.type = 'checkbox';
-            input.setAttribute('data-role', role);
-            input.setAttribute('data-tag', opt.tag);
-            input.checked = ticked.indexOf(opt.tag) !== -1;
-            label.appendChild(input);
-            label.appendChild(document.createTextNode(opt.label));
-            optionsWrap.appendChild(label);
-          });
-          fieldset.appendChild(optionsWrap);
-          grid.appendChild(fieldset);
-        });
-      }
-
-      function readRoleModelSelection() {
-        var selection = {};
-        var boxes = document.getElementById('role-model-grid').querySelectorAll('input[type="checkbox"]');
-        Array.prototype.forEach.call(boxes, function (box) {
-          if (!box.checked) return;
-          var role = box.getAttribute('data-role');
-          (selection[role] = selection[role] || []).push(box.getAttribute('data-tag'));
-        });
-        return selection;
-      }
-
       function loadSettings() {
-        Promise.all([window.desktop.getSettings(), roleModelsCache ? Promise.resolve(roleModelsCache) : window.desktop.getRoleModels()])
-          .then(function (results) {
-            var settings = results[0];
-            roleModelsCache = results[1];
-            document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'ollama';
-            // The stored API key is never sent back to the UI. Leave the field blank
-            // and reflect its state via the placeholder; typing a new value replaces
-            // it, leaving it blank keeps the existing one (see saveSettings).
-            var apiKeyField = document.getElementById('setting-api-key');
-            apiKeyField.value = '';
-            if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
-              apiKeyField.placeholder = 'Stored key could not be read on this machine — re-enter it';
-            } else if (settings.ANTHROPIC_API_KEY_SET) {
-              apiKeyField.placeholder = '•••••••• stored — leave blank to keep, or type to replace';
-            } else {
-              apiKeyField.placeholder = 'sk-ant-...';
-            }
-            document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
-            renderRoleModelGrid(roleModelsCache, settings.OLLAMA_ROLE_MODEL_SELECTION || {});
-          });
+        window.desktop.getSettings().then(function (settings) {
+          document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'ollama';
+          document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
+          document.getElementById('setting-claude-cli-path').value = settings.CLAUDE_CLI_PATH || '';
+          document.getElementById('setting-claude-cli-model').value = settings.CLAUDE_CLI_MODEL || '';
+        });
       }
 
       function saveSettings() {
         var settings = {
           LLM_PROVIDER: document.getElementById('setting-provider').value,
           OLLAMA_URL: document.getElementById('setting-ollama-url').value.trim(),
-          OLLAMA_ROLE_MODEL_SELECTION: readRoleModelSelection()
+          CLAUDE_CLI_PATH: document.getElementById('setting-claude-cli-path').value.trim(),
+          CLAUDE_CLI_MODEL: document.getElementById('setting-claude-cli-model').value.trim()
         };
-        // Only overwrite the stored API key when the user actually typed a new one;
-        // a blank field means "keep the existing key" and is omitted entirely so it
-        // is never clobbered.
-        var apiKey = document.getElementById('setting-api-key').value.trim();
-        if (apiKey) settings.ANTHROPIC_API_KEY = apiKey;
         window.desktop.setSettings(settings).then(function () {
           toggleSettings();
           refreshProviderStatus();
@@ -973,12 +898,10 @@
         window.desktop.getSettings().then(function (settings) {
           var provider = settings.LLM_PROVIDER || 'ollama';
           var el = document.getElementById('provider-status');
-          if (provider === 'ollama') {
-            el.textContent = 'Using local Ollama (' + (settings.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions') + ')';
-          } else if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
-            el.textContent = 'Using Claude API — stored key could not be read on this machine, open Settings to re-enter it';
+          if (provider === 'claude-cli') {
+            el.textContent = 'Using Claude CLI (' + (settings.CLAUDE_CLI_PATH || 'claude') + ')';
           } else {
-            el.textContent = settings.ANTHROPIC_API_KEY_SET ? 'Using Claude API' : 'Using Claude API — no API key set yet, open Settings';
+            el.textContent = 'Using local Ollama (' + (settings.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions') + ')';
           }
         });
       }

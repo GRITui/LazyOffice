@@ -26,7 +26,6 @@ ipcMain.handle('lazyoffice:getPlan', (event, userRequest, attachments, outputTyp
 ipcMain.handle('lazyoffice:classifyAttachments', (event, attachments) => engine.classifyAttachments(attachments));
 ipcMain.handle('lazyoffice:buildContent', (event, userRequest, attachments, outputType) => docgen.buildContent(userRequest, attachments, outputType));
 ipcMain.handle('lazyoffice:createOutput', (event, outputType, parsed) => docgen.createOutput(outputType, parsed));
-ipcMain.handle('lazyoffice:getRoleModels', () => engine.OLLAMA_ROLE_MODELS);
 ipcMain.handle('lazyoffice:openInFinder', (event, filePath) => shell.showItemInFolder(filePath));
 
 // --- First-run local-LLM setup ---
@@ -59,38 +58,26 @@ ipcMain.handle('lazyoffice:llmMarkDone', () => {
   ScriptProperties.setProperty('LLM_SETUP_DONE', 'true');
 });
 
+// No secrets among these — the Claude API key (and the safeStorage
+// encryption that protected it at rest) is gone along with the Claude API
+// option; CLAUDE_CLI_PATH/CLAUDE_CLI_MODEL configure the local `claude`
+// binary, not a credential.
 const SETTINGS_KEYS = [
   'LLM_PROVIDER',
-  'ANTHROPIC_API_KEY',
   'OLLAMA_URL',
-  'OLLAMA_ROLE_MODEL_SELECTION'
+  'CLAUDE_CLI_PATH',
+  'CLAUDE_CLI_MODEL'
 ];
 
-const SECRET_KEYS = ['ANTHROPIC_API_KEY'];
-
 ipcMain.handle('lazyoffice:getSettings', () => {
-  const props = ScriptProperties.getProperties(); // single read; sensitive values decrypted
+  const props = ScriptProperties.getProperties();
   const settings = {};
-  SETTINGS_KEYS.forEach((key) => {
-    if (SECRET_KEYS.indexOf(key) !== -1) {
-      // Never send secrets to the renderer. Report only whether a usable key is
-      // stored (SET) and whether one is stored but can't be read on this machine
-      // (UNREADABLE — decrypt failed), so the UI can prompt appropriately.
-      const val = props[key];
-      settings[key] = '';
-      settings[key + '_SET'] = typeof val === 'string' && val.length > 0;
-      settings[key + '_UNREADABLE'] = val === null; // present in config but decrypt failed
-    } else {
-      settings[key] = props[key] || '';
-    }
-  });
+  SETTINGS_KEYS.forEach((key) => { settings[key] = props[key] || ''; });
   return settings;
 });
 
 ipcMain.handle('lazyoffice:setSettings', (event, settings) => {
-  // Only the keys the renderer actually sent are written. For secrets the
-  // renderer omits the key entirely when the field is left blank, so a blank
-  // Save never overwrites (and never destroys) a stored key.
+  // Only the keys the renderer actually sent are written.
   const toWrite = {};
   SETTINGS_KEYS.forEach((key) => {
     if (Object.prototype.hasOwnProperty.call(settings, key)) {
@@ -101,14 +88,6 @@ ipcMain.handle('lazyoffice:setSettings', (event, settings) => {
 });
 
 app.whenReady().then(() => {
-  // One-time upgrade: encrypt any secret that was stored in plaintext before
-  // at-rest encryption existed. No-op once everything is already encrypted.
-  try {
-    const migrated = ScriptProperties.migrateSecrets();
-    if (migrated) console.log('[config-store] migrated ' + migrated + ' secret(s) to encrypted-at-rest.');
-  } catch (err) {
-    console.warn('[config-store] secret migration skipped:', err && err.message);
-  }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

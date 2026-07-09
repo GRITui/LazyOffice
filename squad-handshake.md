@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T20:05:00Z
+Last Updated: 2026-07-09T21:15:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -118,6 +118,32 @@ been built — both tracks so far were implemented directly to prove the end-to-
   different model for another role has no effect on which model the auditor uses — same
   not-yet-run-in-a-real-window caveat as the batch above.
 
+* `desktop-app/` single-local-model collapse + Claude CLI framework (TSK-003, not yet
+  committed): Owner verified the whole pipeline works on Llama 3.1 8B Instruct alone and asked
+  to (1) remove every other local model from the codebase, (2) remove the Claude API option
+  entirely, (3) start a Claude CLI integration. Landed:
+  - `OLLAMA_ROLE_MODELS`, the per-role tick-box grid, `resolveOllamaCandidates`, and the
+    fallback-chain loop are all gone. `engine.js` now has one constant, `OLLAMA_MODEL =
+    'llama3.1:8b'`, and `callOllama`/`callPromptAuditor` both just call it directly — no role
+    parameter left anywhere in `callLLM`/`callOllama`/`classifyAttachments`/`docgen.js`'s calls.
+    `setup-llm.js`'s `REQUIRED_MODELS` is down to that one entry.
+  - `callClaude`, `CLAUDE_MODEL`, `CLAUDE_API_URL`, the `ANTHROPIC_API_KEY` setting, and the
+    `safeStorage`-based at-rest encryption in `config-store.js` (its only purpose was protecting
+    that key) are all removed — `config-store.js` is back to a plain JSON store.
+  - New `engine.callClaudeCli`: spawns a local `claude` CLI in one-shot mode
+    (`--bare -p "<user>" --append-system-prompt "<system>" --output-format json --allowedTools
+    "" --model <model>`) as the new cloud-optional backend, wired into `callLLM`'s provider
+    switch as `'claude-cli'` (replacing `'claude'`). `--allowedTools ""`/`--bare`/scratch-dir
+    `cwd` are deliberate safety choices — researched via the claude-code-guide agent first,
+    since a wrong flag here could leave a headless spawn hung on an unanswerable permission
+    prompt or let it take a real Bash/file side effect. Settings gets `CLAUDE_CLI_PATH`/
+    `CLAUDE_CLI_MODEL` fields in place of the old API key field.
+  - Verified against a fake `claude` binary stand-in: the exact argv shape, successful JSON
+    parsing, a non-zero-exit error path, and an ENOENT ("not installed") error path all check
+    out, and the prompt auditor was reconfirmed to bypass this entirely and stay on local
+    Ollama even with the backend set to `claude-cli`. **Never run against a real installed
+    `claude` CLI** — flagged in `desktop-app/README.md` as framework-stage, not finished.
+
 ## Blockers & QA Failures
 
 * RESOLVED (2026-07-09): TSK-003 now runs in a real Electron window. `npm start` and the
@@ -144,6 +170,9 @@ been built — both tracks so far were implemented directly to prove the end-to-
   file inspected) — not yet driven through a real Electron window. Needs the same kind of CDP
   pass the base flow got before this is called done.
 * Same caveat for the prompt-auditor follow-up directly below.
+* Same caveat again for the single-model collapse + Claude CLI framework directly below that:
+  the CLI wiring was verified against a fake `claude` binary (exact argv shape, JSON-result
+  parsing, non-zero-exit and ENOENT error paths), never against a real installed CLI.
 
 ## Cross-Squad Requests
 

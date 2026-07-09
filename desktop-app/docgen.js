@@ -50,7 +50,7 @@ async function parseWithSchema(raw, schemaDescription, isValid, fallback) {
     const repairPrompt = 'Convert the following text into valid JSON matching exactly this ' +
       'shape: ' + schemaDescription + '. If it already contains matching JSON, extract and ' +
       'return it verbatim. Respond ONLY with the JSON object — no markdown, no commentary.';
-    const repaired = await callLLM(repairPrompt, raw, 'syntax_enforcer');
+    const repaired = await callLLM(repairPrompt, raw);
     parsed = extractJson(repaired);
     if (parsed && isValid(parsed)) {
       return parsed;
@@ -107,7 +107,7 @@ async function summarizeResult(outputType, parsed, filePath) {
     'it is ready to open. Plain sentences only, no markdown.';
   const userPrompt = 'Title: ' + parsed.title + '\nSaved to: ' + filePath;
   try {
-    return await callLLM(systemPrompt, userPrompt, 'generalist');
+    return await callLLM(systemPrompt, userPrompt);
   } catch (err) {
     return 'Your ' + noun + ' "' + parsed.title + '" is ready.';
   }
@@ -201,7 +201,7 @@ async function buildDocumentContent(userRequest, attachments) {
     'item), respond ONLY with a JSON object of the form ' +
     '{"title": string, "sections": [{"heading": string, "body": string}]}. ' +
     'No markdown, no code fences, no commentary — just the JSON object.';
-  const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
+  const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments));
   return parseDocumentJson(raw);
 }
 
@@ -212,7 +212,7 @@ async function buildSpreadsheetContent(userRequest, attachments) {
     '{"title": string, "sheetName": string, "headers": [string, ...], ' +
     '"rows": [[string|number, ...], ...]} where every row array has the same length as ' +
     'headers. No markdown, no code fences, no commentary — just the JSON object.';
-  const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
+  const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments));
   return parseSpreadsheetJson(raw);
 }
 
@@ -226,7 +226,7 @@ async function buildPresentationContent(userRequest, attachments) {
     '[number, ...]}} for a single clear numeric comparison (e.g. a value per category). Use ' +
     'at most one chart slide, only when the data genuinely supports one. No markdown, no code ' +
     'fences, no commentary — just the JSON object.';
-  const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
+  const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments));
   return parseSlidesJson(raw);
 }
 

@@ -9,94 +9,29 @@
 // no Google Drive dependency at all.
 
 const { ScriptProperties } = require('./config-store');
+const { spawn } = require('child_process');
+const os = require('os');
 
-const CLAUDE_MODEL = 'claude-sonnet-5';
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-
-// Local-first by default: with no configuration the app runs entirely on a
-// local Ollama server (the 5-role pipeline). A cloud provider (Claude) is
-// opt-in via Settings — see callClaude. 'ollama' | 'claude'.
+// Local-first, and now local-only-by-default-model: verified that the whole
+// pipeline works on a single local model, so there is exactly one Ollama
+// model in this codebase — no per-role choice, no tick boxes, no fallback
+// chain. 'ollama' | 'claude-cli'.
 const LLM_PROVIDER_DEFAULT = 'ollama';
 const OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
-const OLLAMA_MODEL_DEFAULT = 'llama3.1:8b';
+const OLLAMA_MODEL = 'llama3.1:8b'; // Llama 3.1 8B Instruct — the only local model this app uses.
 
-// The First Goal doc's pipeline, same mapping as Code.gs, minus the
-// Orchestrator: that stage's job (figure out exactly what the user needs
-// before handing off to this pipeline) is now the prompt auditor below — a
-// single pinned local model, not a per-role tick-box choice — so Qwen3.5-9B
-// is no longer downloaded or configurable here. roleLabel is the friendly
-// pipeline-stage name (Settings groups tick boxes by it); label/ollamaTag
-// describe that role's own recommended model.
-const OLLAMA_ROLE_MODELS = {
-  planner: { roleLabel: 'Planner', label: 'DeepSeek-R1-Distill-Qwen-7B', ollamaTag: 'deepseek-r1:7b' },
-  syntax_enforcer: { roleLabel: 'Syntax Enforcer', label: 'Phi-4-mini (3.8B)', ollamaTag: 'phi4-mini:3.8b' },
-  code_engine: { roleLabel: 'Code Engine', label: 'IBM Granite 4.1 8B', ollamaTag: 'granite4.1:8b' },
-  generalist: { roleLabel: 'Generalist', label: 'Llama 3.1 8B Instruct', ollamaTag: 'llama3.1:8b' }
-};
-
-// The prompt auditor: a single pinned local model that decides exactly what
-// the user needs (see getPlan) before anything "handshakes" with the backend
-// pipeline above. Always runs on Ollama with this one model, regardless of
-// LLM_PROVIDER or any tick-box selection — reuses the Generalist's tag
-// (already required, so this adds no extra download) rather than a separate
-// model.
-const PROMPT_AUDITOR_MODEL = OLLAMA_ROLE_MODELS.generalist.ollamaTag;
-
-async function callLLM(systemPrompt, userPrompt, role) {
+async function callLLM(systemPrompt, userPrompt) {
   const provider = ScriptProperties.getProperty('LLM_PROVIDER') || LLM_PROVIDER_DEFAULT;
-  if (provider === 'ollama') {
-    return callOllama(systemPrompt, userPrompt, role);
+  if (provider === 'claude-cli') {
+    return callClaudeCli(systemPrompt, userPrompt);
   }
-  return callClaude(systemPrompt, userPrompt);
+  return callOllama(systemPrompt, userPrompt);
 }
 
-async function callClaude(systemPrompt, userPrompt) {
-  const apiKey = ScriptProperties.getProperty('ANTHROPIC_API_KEY');
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not set. Open Settings and add your Anthropic API key.');
-  }
-
+async function callOllama(systemPrompt, userPrompt) {
+  const url = ScriptProperties.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
   const payload = {
-    model: CLAUDE_MODEL,
-    max_tokens: 1024,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }]
-  };
-
-  const response = await fetch(CLAUDE_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify(payload)
-  });
-
-  const text = await response.text();
-  if (response.status !== 200) {
-    throw new Error('Claude API error ' + response.status + ': ' + text);
-  }
-
-  const body = JSON.parse(text);
-  return body.content[0].text;
-}
-
-// Settings stores OLLAMA_ROLE_MODEL_SELECTION as { role: [tag, tag, ...] } —
-// the tick boxes in the renderer, in the order they were ticked. An empty or
-// missing selection for a role falls back to that role's own recommended tag.
-function resolveOllamaCandidates(role) {
-  const selection = ScriptProperties.getProperty('OLLAMA_ROLE_MODEL_SELECTION');
-  const picked = selection && Array.isArray(selection[role]) ? selection[role].filter(Boolean) : [];
-  if (picked.length) return picked;
-  const roleConfig = OLLAMA_ROLE_MODELS[role];
-  if (roleConfig) return [roleConfig.ollamaTag];
-  return [ScriptProperties.getProperty('OLLAMA_MODEL') || OLLAMA_MODEL_DEFAULT];
-}
-
-async function callOllamaModel(url, model, systemPrompt, userPrompt) {
-  const payload = {
-    model: model,
+    model: OLLAMA_MODEL,
     max_tokens: 1024,
     messages: [
       { role: 'system', content: systemPrompt },
@@ -112,46 +47,108 @@ async function callOllamaModel(url, model, systemPrompt, userPrompt) {
 
   const text = await response.text();
   if (response.status !== 200) {
-    throw new Error('Ollama error ' + response.status + ' for model "' + model + '": ' + text);
+    throw new Error('Ollama error ' + response.status + ' for model "' + OLLAMA_MODEL + '": ' + text);
   }
 
   const body = JSON.parse(text);
   if (!body.choices || !body.choices[0] || !body.choices[0].message) {
-    throw new Error('Unexpected Ollama response shape for model "' + model + '": ' + text.slice(0, 300));
+    throw new Error('Unexpected Ollama response shape for model "' + OLLAMA_MODEL + '": ' + text.slice(0, 300));
   }
   return body.choices[0].message.content;
 }
 
-// Tries each ticked model for the role in order, falling through to the next
-// on failure (server unreachable, model not pulled yet, etc.) — the
-// multi-select fallback chain behind the Settings tick boxes.
-async function callOllama(systemPrompt, userPrompt, role) {
-  const url = ScriptProperties.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
-  const candidates = resolveOllamaCandidates(role);
-  let lastErr = null;
-  for (let i = 0; i < candidates.length; i++) {
-    try {
-      return await callOllamaModel(url, candidates[i], systemPrompt, userPrompt);
-    } catch (err) {
-      lastErr = err;
-    }
+// Always local, always OLLAMA_MODEL. getPlan calls this directly rather than
+// going through callLLM's provider switch: the "what does the user actually
+// need" step should stay fast, free, and available even when LLM_PROVIDER is
+// pointed at claude-cli for the backend that does the actual drafting.
+async function callPromptAuditor(systemPrompt, userPrompt) {
+  try {
+    return await callOllama(systemPrompt, userPrompt);
+  } catch (err) {
+    throw new Error('Prompt auditor (local ' + OLLAMA_MODEL + ') is unreachable. This step always ' +
+      'runs locally regardless of your provider setting — install/start Ollama and pull ' +
+      OLLAMA_MODEL + ', then try again. (' + err.message + ')');
   }
-  throw lastErr || new Error('No Ollama model configured for role "' + role + '".');
 }
 
-// Always local, always this one model — see PROMPT_AUDITOR_MODEL. Ignores
-// LLM_PROVIDER and OLLAMA_ROLE_MODEL_SELECTION entirely: the audit step
-// should stay fast, free, and available even when the rest of the pipeline
-// is pointed at a cloud provider.
-async function callPromptAuditor(systemPrompt, userPrompt) {
-  const url = ScriptProperties.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
-  try {
-    return await callOllamaModel(url, PROMPT_AUDITOR_MODEL, systemPrompt, userPrompt);
-  } catch (err) {
-    throw new Error('Prompt auditor (local ' + PROMPT_AUDITOR_MODEL + ') is unreachable at ' + url +
-      '. This step always runs locally regardless of your provider setting — install/start ' +
-      'Ollama and pull ' + PROMPT_AUDITOR_MODEL + ', then try again. (' + err.message + ')');
-  }
+const CLAUDE_CLI_BIN_DEFAULT = 'claude';
+const CLAUDE_CLI_MODEL_DEFAULT = 'claude-sonnet-5';
+const CLAUDE_CLI_TIMEOUT_MS = 120000;
+
+/**
+ * Shells out to a locally-installed Claude Code CLI as a one-shot text
+ * completion backend — rides on the user's own `claude` login instead of a
+ * separately-managed Anthropic API key. Framework-stage: written from the
+ * CLI's documented headless-mode flags (code.claude.com/docs/en/headless.md),
+ * not yet exercised against a real installed CLI — this sandbox doesn't have
+ * one wired up the way the Owner's machine will, so treat this as unverified
+ * until run for real (see README).
+ *
+ * Locked down deliberately: --allowedTools "" so the call can never end up
+ * blocked on a permission prompt (there is no TTY to answer one) or take a
+ * side-effecting action (Bash, file edits) as an accidental consequence of
+ * what is supposed to be a pure text-in/text-out call; --bare skips
+ * hook/MCP/skill discovery; cwd is a scratch temp dir so it never picks up
+ * this repo's own CLAUDE.md/hooks. --output-format json is used so the
+ * response can be parsed from the "result" field rather than scraped from
+ * mixed stdout.
+ */
+function callClaudeCli(systemPrompt, userPrompt) {
+  const bin = ScriptProperties.getProperty('CLAUDE_CLI_PATH') || CLAUDE_CLI_BIN_DEFAULT;
+  const model = ScriptProperties.getProperty('CLAUDE_CLI_MODEL') || CLAUDE_CLI_MODEL_DEFAULT;
+  const args = [
+    '--bare',
+    '-p', userPrompt,
+    '--append-system-prompt', systemPrompt,
+    '--output-format', 'json',
+    '--allowedTools', '',
+    '--model', model
+  ];
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const child = spawn(bin, args, { cwd: os.tmpdir() });
+    const timer = setTimeout(() => {
+      settled = true;
+      child.kill('SIGKILL');
+      reject(new Error('Claude CLI timed out after ' + Math.round(CLAUDE_CLI_TIMEOUT_MS / 1000) + 's.'));
+    }, CLAUDE_CLI_TIMEOUT_MS);
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error('Could not run the Claude CLI ("' + bin + '"). Is it installed and on PATH? ' +
+        'Set a custom path in Settings if not. (' + err.message + ')'));
+    });
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error('Claude CLI exited with code ' + code + ': ' + (stderr || stdout).slice(0, 500)));
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch (err) {
+        reject(new Error('Unexpected Claude CLI output (not JSON): ' + stdout.slice(0, 300)));
+        return;
+      }
+      if (typeof parsed.result !== 'string') {
+        reject(new Error('Unexpected Claude CLI JSON shape (no "result" field): ' + stdout.slice(0, 300)));
+        return;
+      }
+      resolve(parsed.result);
+    });
+  });
 }
 
 const MAX_INLINE_TEXT_CHARS = 4000;
@@ -228,7 +225,7 @@ async function classifyAttachments(attachments) {
     return descriptor;
   }).join('\n\n');
 
-  const raw = await callLLM(systemPrompt, userPrompt, 'planner');
+  const raw = await callLLM(systemPrompt, userPrompt);
   return parseAttachmentRoles(raw, attachments);
 }
 
@@ -286,9 +283,9 @@ function buildClarificationContext(clarifications) {
 }
 
 /**
- * Stage 1 of the HITL flow — the prompt auditor (see PROMPT_AUDITOR_MODEL;
- * always local Llama 3.1 8B Instruct, never the cloud provider or a
- * tick-boxed model). Before drafting a plan, it first judges whether the
+ * Stage 1 of the HITL flow — the prompt auditor (see callPromptAuditor;
+ * always local Llama 3.1 8B Instruct, never the configured backend
+ * provider). Before drafting a plan, it first judges whether the
  * request has enough detail to plan confidently for the chosen output type —
  * if not, it asks a short list of clarifying questions instead of guessing.
  * The renderer collects the user's answers and calls this again with the
@@ -343,13 +340,12 @@ async function getPlan(userRequest, attachments, outputType, clarifications) {
 
 module.exports = {
   callLLM,
-  callClaude,
   callOllama,
+  callClaudeCli,
   callPromptAuditor,
   buildAttachmentContext,
   classifyAttachments,
   parseAttachmentRoles,
   getPlan,
-  OLLAMA_ROLE_MODELS,
-  PROMPT_AUDITOR_MODEL
+  OLLAMA_MODEL
 };
