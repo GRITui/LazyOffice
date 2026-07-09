@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T12:10:00Z
+Last Updated: 2026-07-09T17:24:35Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -40,18 +40,68 @@ been built — both tracks so far were implemented directly to prove the end-to-
   now runs as a JSON-repair step when the Code Engine's output fails to parse; Generalist
   (Llama 3.1 8B) drafts the delivery summary now shown in the result card. All 5 First Goal
   doc roles have a real call site (previously 3 of 5).
+* `desktop-app/` first real Electron run + P1 fixes (TSK-003, committed 3787e8c): confirmed
+  the app launches (`npm start` and packaged `.app`); added the missing
+  `OLLAMA_SYNTAX_MODEL`/`OLLAMA_GENERALIST_MODEL` Settings fields so all 5 roles are
+  configurable; added `electron-builder` packaging (`npm run pack`/`dist`). Documented the
+  Node-26 `extract-zip` install gotcha in the README.
+* `desktop-app/` end-to-end GUI verification (TSK-003): drove the real renderer over Electron's
+  remote-debugging port (CDP) for all 3 output types — Get Plan → Approve & Generate → file —
+  each producing a valid OOXML file on disk (docx headings/body, xlsx headers+rows, pptx with
+  a native chart). Full stack exercised: DOM → preload → IPC → engine → docgen → disk.
+* `desktop-app/` polish (TSK-003, not yet committed): added a custom app icon
+  (`build/icon.icns` + generator in `build/make_icon.py`), wired via `build.mac.icon`;
+  hardened the API key at rest — `config-store.js` now encrypts `ANTHROPIC_API_KEY` via
+  Electron `safeStorage` (OS keychain), transparent to callers, with plaintext fallback when
+  encryption is unavailable (verified with an 8-assertion headless Electron test). README now
+  documents the code-signing/notarization steps that remain (owner-provided Apple cert).
+
+* `desktop-app/` QA pass + fixes (TSK-003, not yet committed): ran a high-effort multi-agent
+  code review over the P1 + polish commits; it found 8 confirmed issues, all in the just-added
+  code. Fixed all: the serious ones were in the `safeStorage` change — a decrypt-failure +
+  blank-Save combination that could permanently clobber a stored key, plus a present-but-
+  unreadable key reading as unset. Redesign: secrets are never sent to the renderer (getSettings
+  returns SET/UNREADABLE flags only), a blank API-key field is omitted from Save so it never
+  overwrites a stored key, `maybeDecrypt` now gates on `encryptionAvailable()` symmetrically,
+  a startup `migrateSecrets()` encrypts any legacy plaintext key, `setProperties`/`getProperties`
+  batch to one read/write, plaintext fallback now warns, and dead icon-drawing code was removed.
+  Verified: 16-assertion headless config-store test + 9-assertion CDP Settings-flow test (incl.
+  the no-clobber scenario) all pass.
+
+* `desktop-app/` local-first + first-run model setup (TSK-003, not yet committed): default
+  provider flipped to local Ollama (`engine.js` `LLM_PROVIDER_DEFAULT='ollama'`, renderer
+  fallbacks); cloud (Claude) stays opt-in via Settings. New `setup-llm.js` talks to Ollama's
+  native HTTP API (`/api/tags`, `/api/pull`) — on first run it detects which of the 5 pipeline
+  models are already installed and pulls ONLY the missing ones (never re-downloads), streaming
+  progress to a new first-run panel in the renderer; if Ollama isn't running it guides the user
+  to install it (the runtime itself is never auto-installed). Completion is remembered
+  (`LLM_SETUP_DONE`). Secret scan of the repo came back clean (no keys committed); added
+  defensive `.gitignore` (`config.json`, `*.env`, `*.log`). Caught + fixed a packaging bug:
+  `setup-llm.js` was missing from `build.files`, so the packaged app.asar omitted it and the
+  window failed to open — added it and re-verified the packaged app launches. Verified:
+  14-assertion setup-llm unit test + 7-assertion first-run CDP test (against a fake Ollama),
+  passing on BOTH the dev binary and the packaged `.app`.
 
 ## Blockers & QA Failures
 
-* TSK-003 (`desktop-app/`): not yet run inside an actual Electron window — installing the
-  `electron` binary needs network access to its download CDN, unavailable in the sandbox
-  this was built in. `engine.js`/`docgen.js` were instead logic-tested directly under plain
-  Node against local stand-in Claude/Ollama servers, for all three output types — each
-  generated `.docx`/`.xlsx`/`.pptx` was unzipped and its actual content checked (headers/
-  rows for the spreadsheet, slide text for the presentation), not just confirmed to exist.
-  Needs a real run on the Owner's machine to confirm the Electron window/IPC/Settings-panel
-  layer itself works before calling TSK-003 done.
-* No QA-Squad pass has run against either track yet.
+* RESOLVED (2026-07-09): TSK-003 now runs in a real Electron window. `npm start` and the
+  `electron-builder`-packaged `LazyOffice.app` both launch; the renderer/IPC/Settings layer
+  loads from `app.asar` without error (verified via the live renderer helper process). Setup
+  gotcha found and documented: on Node 26, electron's bundled `extract-zip` fails mid-extract
+  and leaves a broken ~256K stub — the binary must be extracted with macOS `ditto` + a manual
+  `path.txt` (see `desktop-app/README.md`); `electron-builder`'s own extractor is fine.
+* Two P1 fixes landed alongside the run: (1) the Settings panel now exposes all 5 First Goal
+  roles — `OLLAMA_SYNTAX_MODEL` and `OLLAMA_GENERALIST_MODEL` were called in `docgen.js` but
+  had no UI/IPC field (added to `main.js` `SETTINGS_KEYS` and `renderer/index.html`);
+  (2) `electron-builder` packaging config added to `package.json` (`npm run pack`/`dist`).
+* RESOLVED (2026-07-09): the full GUI flow (request → Get Plan → Approve & Generate → file)
+  is now driven end-to-end for all 3 output types via CDP against the real renderer; icon and
+  at-rest key encryption added. A high-effort code-review QA pass ran over the desktop track
+  and its 8 findings were all fixed and re-verified (see the QA entry above). The single
+  remaining item before TSK-003 is fully "done": code-signing + notarization, blocked on an
+  owner-provided Apple Developer ID cert (steps documented in `desktop-app/README.md`).
+* QA status: the desktop track (TSK-003) has had a code-review pass (fixes verified). The GAS
+  webapp track (TSK-001) has not had a dedicated QA pass yet.
 
 ## Cross-Squad Requests
 

@@ -13,7 +13,10 @@ const { ScriptProperties } = require('./config-store');
 const CLAUDE_MODEL = 'claude-sonnet-5';
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 
-const LLM_PROVIDER_DEFAULT = 'claude'; // 'claude' | 'ollama'
+// Local-first by default: with no configuration the app runs entirely on a
+// local Ollama server (the 5-role pipeline). A cloud provider (Claude) is
+// opt-in via Settings — see callClaude. 'ollama' | 'claude'.
+const LLM_PROVIDER_DEFAULT = 'ollama';
 const OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
 const OLLAMA_MODEL_DEFAULT = 'llama3.1:8b';
 

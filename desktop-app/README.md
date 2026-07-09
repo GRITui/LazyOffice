@@ -13,7 +13,7 @@ that track.
 | UI ↔ backend | `google.script.run` | Electron IPC (`preload.js` → `main.js`) |
 | Output | Real Google Doc via `DocumentApp` | Local `.docx`/`.xlsx`/`.pptx` file (`~/Documents/LazyOffice/`) — no Google account needed |
 | Settings | Apps Script Script Properties (editor UI) | In-app Settings panel → local `config.json` in the OS user-data dir |
-| LLM backends | Claude API, or local Ollama (script properties) | Same: Claude API, or local Ollama (Settings panel) |
+| LLM backends | Claude API, or local Ollama (script properties) | **Local Ollama by default**; Claude API opt-in (Settings panel) |
 
 `engine.js` is a deliberate near-1:1 port of `Code.gs`'s LLM logic (same function names/
 shapes, same 5-model `OLLAMA_ROLE_MODELS` mapping from the First Goal doc) so the two stay
@@ -24,10 +24,36 @@ documents). Pick the output type in the UI; `docgen.js` writes a real `.docx` (`
 package), `.xlsx` (`xlsx`/SheetJS), or `.pptx` (`pptxgenjs`) accordingly — no
 `DocumentApp`/`SpreadsheetApp`/`SlidesApp` involved.
 
+## Local-first by default
+
+Out of the box the app runs entirely on a **local Ollama server** — no API key, nothing sent
+to the cloud (`LLM_PROVIDER` defaults to `ollama` in `engine.js`). To use a cloud model
+instead, open Settings, switch the provider to "Claude API", and enter a key (encrypted at
+rest — see below). The key is never sent to the cloud until you opt in.
+
+### First-run model setup
+
+On first launch, if the provider is the local default, the app checks the local Ollama server
+(`setup-llm.js`) and shows a one-time setup panel:
+
+- If Ollama **isn't running**, it points you to https://ollama.com/download and offers a
+  Recheck button (the Ollama runtime itself is a system component — the app never installs it
+  for you). You can also just switch to a cloud model in Settings.
+- If Ollama **is running**, it lists which of the five First Goal pipeline models
+  (`qwen3.5:9b`, `deepseek-r1:7b`, `phi4-mini:3.8b`, `granite4.1:8b`, `llama3.1:8b`) are
+  missing and downloads only those, streaming progress. **Models already on the device are
+  detected and kept** — it never re-downloads what you have. "Skip for now" dismisses the
+  panel; completion is remembered (`LLM_SETUP_DONE`).
+
+Uses Ollama's native HTTP API (`GET /api/tags`, `POST /api/pull`); the host is derived from
+the `OLLAMA_URL` setting (default `http://127.0.0.1:11434`).
+
 ## What's here
 
 - `main.js` — Electron main process: creates the window, wires IPC handlers for
-  `getPlan`/`classifyAttachments`/`generateOutput`/settings/`openInFinder`.
+  `getPlan`/`classifyAttachments`/`generateOutput`/settings/`openInFinder` and the first-run
+  `llmStatus`/`llmSetup` flow.
+- `setup-llm.js` — first-run local-model detection + pulling (Ollama HTTP API).
 - `preload.js` — exposes a `window.desktop` bridge to the renderer (contextIsolation on,
   nodeIntegration off).
 - `engine.js` — ported LLM logic (`callLLM`/`callClaude`/`callOllama`, attachment role
@@ -60,18 +86,69 @@ the file lands in `~/Documents/LazyOffice/`.
 
 ## Status
 
-Scaffolded and logic-tested (the Claude and Ollama code paths, and real `.docx`/`.xlsx`/
-`.pptx` generation for all three output types, were verified against local stand-in
-servers — see commit history for details; each generated file was unzipped and its actual
-content checked, not just its existence). **Not yet run inside an actual Electron window** —
-installing the `electron` binary needs network access to its download CDN, which wasn't
-available in the sandbox this was built in. Also not yet packaged for macOS distribution (no
-`electron-builder`/notarization setup yet).
+Runs in a real Electron window and is **packaged into a `.app`** (with a custom icon) via
+`electron-builder` (see Building below). The full flow has been **driven end-to-end through
+the real renderer** — for each of the three output types, a request → plan (Get Plan) →
+approve (Approve & Generate) → file-write cycle was exercised against a local stand-in LLM,
+and each resulting `.docx`/`.xlsx`/`.pptx` was opened and its content verified (real
+headings/rows/slides, and a native chart in the deck), not just its existence. On macOS (this
+app's target) the API key is encrypted at rest via the OS keychain (Electron `safeStorage`);
+a pre-existing plaintext key is migrated to encrypted on first launch. On a platform with no
+credential store available, it falls back to plaintext with a console warning rather than
+refusing to start — so the encrypted-at-rest guarantee holds on macOS/Windows but not
+necessarily on a bare Linux box.
+
+Remaining before public distribution: code-signing + notarization (needs an Apple Developer
+ID — see below), and a formal QA pass.
+
+## Building a macOS app
+
+```
+npm install
+npm run pack   # unpacked LazyOffice.app in release/mac-arm64/ (no signing — fastest)
+npm run dist   # .dmg + .zip in release/ (still unsigned)
+```
+
+Both produce an **unsigned** app. macOS Gatekeeper will warn on first open (right-click →
+Open, or `xattr -dr com.apple.quarantine <app>`). Real distribution needs a Developer ID
+cert + notarization — not set up yet.
+
+### Setup gotcha (Node 26)
+
+`npm install` alone does **not** produce a working `electron` binary here: electron's bundled
+`extract-zip` (yauzl) fails partway through extraction on Node 26, leaving a ~256K stub and no
+`node_modules/electron/path.txt`. The cached zip itself is intact (`unzip -t` passes) — only
+the JS extractor is broken. Workaround: extract with macOS-native `ditto` and write `path.txt`
+manually:
+
+```
+ZIP=$(find ~/Library/Caches/electron -name 'electron-v*-darwin-arm64.zip' | head -1)
+rm -rf node_modules/electron/dist && mkdir -p node_modules/electron/dist
+ditto -x -k "$ZIP" node_modules/electron/dist
+printf 'Electron.app/Contents/MacOS/Electron' > node_modules/electron/path.txt
+```
+
+(`electron-builder`'s own extractor is unaffected — `npm run pack`/`dist` work fine.)
+
+## Code-signing & notarization
+
+The build is currently **unsigned** (`electron-builder` reports "0 identities found"), so
+macOS Gatekeeper warns on first open (right-click → Open, or
+`xattr -dr com.apple.quarantine <app>`). To sign + notarize for real distribution you need an
+Apple Developer ID:
+
+1. Enroll in the Apple Developer Program and install a "Developer ID Application" certificate
+   in your login keychain.
+2. `electron-builder` auto-detects the identity; for notarization add an
+   `afterSign` notarize hook (`@electron/notarize`) with an app-specific password or an App
+   Store Connect API key, plus `"hardenedRuntime": true` under `build.mac`.
+
+Everything else (icon, packaging, entitlements-free runtime) is already in place — only the
+cert + notarize credentials are missing, and those are owner-provided.
 
 ## Known gaps
 
-- No macOS packaging/code-signing/notarization yet (needed for real distribution outside your
-  own machine).
-- No automated tests beyond the manual verification during development.
-- Settings are stored in plaintext JSON (`config.json` in the OS user-data dir) — fine for a
-  prototype, not for a shipped app holding a real API key.
+- Unsigned build (see above) — the only blocker to distributing outside your own machine.
+- No automated test suite yet — verification so far is manual + the end-to-end renderer drive
+  described under Status.
+- No formal QA-Squad pass has run against the app.

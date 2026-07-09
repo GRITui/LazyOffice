@@ -270,6 +270,19 @@
       .type-btn:hover:not(:disabled) { background: var(--bg); }
       .type-btn.active { background: var(--accent); color: var(--accent-text); }
       .type-btn.active:hover { background: var(--accent); }
+      #llm-setup-box .card-label { color: var(--accent); }
+      #llm-setup-msg { font-size: 13px; line-height: 1.5; margin: 0 0 10px; }
+      .llm-model-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+      .llm-model-list li {
+        padding: 6px 10px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 12px;
+        font-family: ui-monospace, "SF Mono", "Roboto Mono", monospace;
+        word-break: break-all;
+      }
+      .llm-model-list li.done { color: var(--success-text); }
     </style>
   </head>
   <body>
@@ -281,6 +294,17 @@
       <button type="button" class="settings-toggle" onclick="toggleSettings()">Settings</button>
     </div>
     <p class="provider-status" id="provider-status"></p>
+
+    <div id="llm-setup-box" class="card">
+      <p class="card-label">Local model setup</p>
+      <p id="llm-setup-msg"></p>
+      <ul id="llm-setup-models" class="llm-model-list"></ul>
+      <div class="actions">
+        <button id="llm-download-btn" onclick="startLlmSetup()">Download models</button>
+        <button id="llm-recheck-btn" class="secondary" onclick="checkFirstRunSetup()">Recheck</button>
+        <button id="llm-skip-btn" class="secondary" onclick="skipLlmSetup()">Skip for now</button>
+      </div>
+    </div>
 
     <div id="settings-box" class="card">
       <p class="card-label">Settings</p>
@@ -308,8 +332,16 @@
         <input type="text" id="setting-planner-model" placeholder="deepseek-r1:7b">
       </div>
       <div class="settings-field">
+        <label for="setting-syntax-model">Syntax Enforcer model (Ollama)</label>
+        <input type="text" id="setting-syntax-model" placeholder="phi4-mini:3.8b">
+      </div>
+      <div class="settings-field">
         <label for="setting-code-engine-model">Code Engine model (Ollama)</label>
         <input type="text" id="setting-code-engine-model" placeholder="granite4.1:8b">
+      </div>
+      <div class="settings-field">
+        <label for="setting-generalist-model">Generalist model (Ollama)</label>
+        <input type="text" id="setting-generalist-model" placeholder="llama3.1:8b">
       </div>
       <p class="settings-hint">Ollama fields are only used when the provider above is "Local Ollama". Leave a model field blank to use its default tag.</p>
       <div class="actions">
@@ -680,24 +712,43 @@
 
       function loadSettings() {
         window.desktop.getSettings().then(function (settings) {
-          document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'claude';
-          document.getElementById('setting-api-key').value = settings.ANTHROPIC_API_KEY || '';
+          document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'ollama';
+          // The stored API key is never sent back to the UI. Leave the field blank
+          // and reflect its state via the placeholder; typing a new value replaces
+          // it, leaving it blank keeps the existing one (see saveSettings).
+          var apiKeyField = document.getElementById('setting-api-key');
+          apiKeyField.value = '';
+          if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
+            apiKeyField.placeholder = 'Stored key could not be read on this machine — re-enter it';
+          } else if (settings.ANTHROPIC_API_KEY_SET) {
+            apiKeyField.placeholder = '•••••••• stored — leave blank to keep, or type to replace';
+          } else {
+            apiKeyField.placeholder = 'sk-ant-...';
+          }
           document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
           document.getElementById('setting-orchestrator-model').value = settings.OLLAMA_ORCHESTRATOR_MODEL || '';
           document.getElementById('setting-planner-model').value = settings.OLLAMA_PLANNER_MODEL || '';
+          document.getElementById('setting-syntax-model').value = settings.OLLAMA_SYNTAX_MODEL || '';
           document.getElementById('setting-code-engine-model').value = settings.OLLAMA_CODE_ENGINE_MODEL || '';
+          document.getElementById('setting-generalist-model').value = settings.OLLAMA_GENERALIST_MODEL || '';
         });
       }
 
       function saveSettings() {
         var settings = {
           LLM_PROVIDER: document.getElementById('setting-provider').value,
-          ANTHROPIC_API_KEY: document.getElementById('setting-api-key').value.trim(),
           OLLAMA_URL: document.getElementById('setting-ollama-url').value.trim(),
           OLLAMA_ORCHESTRATOR_MODEL: document.getElementById('setting-orchestrator-model').value.trim(),
           OLLAMA_PLANNER_MODEL: document.getElementById('setting-planner-model').value.trim(),
-          OLLAMA_CODE_ENGINE_MODEL: document.getElementById('setting-code-engine-model').value.trim()
+          OLLAMA_SYNTAX_MODEL: document.getElementById('setting-syntax-model').value.trim(),
+          OLLAMA_CODE_ENGINE_MODEL: document.getElementById('setting-code-engine-model').value.trim(),
+          OLLAMA_GENERALIST_MODEL: document.getElementById('setting-generalist-model').value.trim()
         };
+        // Only overwrite the stored API key when the user actually typed a new one;
+        // a blank field means "keep the existing key" and is omitted entirely so it
+        // is never clobbered.
+        var apiKey = document.getElementById('setting-api-key').value.trim();
+        if (apiKey) settings.ANTHROPIC_API_KEY = apiKey;
         window.desktop.setSettings(settings).then(function () {
           toggleSettings();
           refreshProviderStatus();
@@ -706,17 +757,112 @@
 
       function refreshProviderStatus() {
         window.desktop.getSettings().then(function (settings) {
-          var provider = settings.LLM_PROVIDER || 'claude';
+          var provider = settings.LLM_PROVIDER || 'ollama';
           var el = document.getElementById('provider-status');
           if (provider === 'ollama') {
             el.textContent = 'Using local Ollama (' + (settings.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions') + ')';
+          } else if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
+            el.textContent = 'Using Claude API — stored key could not be read on this machine, open Settings to re-enter it';
           } else {
-            el.textContent = settings.ANTHROPIC_API_KEY ? 'Using Claude API' : 'Using Claude API — no API key set yet, open Settings';
+            el.textContent = settings.ANTHROPIC_API_KEY_SET ? 'Using Claude API' : 'Using Claude API — no API key set yet, open Settings';
           }
         });
       }
 
+      // --- First-run local-LLM setup ---
+      var llmSetupWired = false;
+      function llmCssId(tag) { return 'llm-model-' + tag.replace(/[^a-z0-9]/gi, '-'); }
+      function fmtBytes(n) {
+        if (!n) return '';
+        if (n < 1048576) return Math.round(n / 1024) + ' KB';
+        if (n < 1073741824) return (n / 1048576).toFixed(0) + ' MB';
+        return (n / 1073741824).toFixed(1) + ' GB';
+      }
+
+      function renderMissingList(missing) {
+        var ul = document.getElementById('llm-setup-models');
+        ul.innerHTML = '';
+        missing.forEach(function (m) {
+          var li = document.createElement('li');
+          li.id = llmCssId(m.tag);
+          li.textContent = m.role + ' — ' + m.tag + ' (pending)';
+          ul.appendChild(li);
+        });
+      }
+
+      // Decide whether to show the first-run panel and in which state. Only
+      // nags for the local-first default (provider 'ollama') and only until the
+      // user finishes or skips.
+      function checkFirstRunSetup() {
+        if (!window.desktop.llmStatus) return;
+        window.desktop.llmStatus().then(function (st) {
+          var box = document.getElementById('llm-setup-box');
+          var msg = document.getElementById('llm-setup-msg');
+          var dl = document.getElementById('llm-download-btn');
+          if (st.provider !== 'ollama' || st.setupDone) { box.style.display = 'none'; return; }
+          if (!st.ollamaUp) {
+            msg.innerHTML = 'LazyOffice runs on a local LLM (Ollama), but no Ollama server was found at ' +
+              st.host + '. Install it from ollama.com/download and start it, then click Recheck — ' +
+              'or switch to a cloud model in Settings.';
+            document.getElementById('llm-setup-models').innerHTML = '';
+            dl.style.display = 'none';
+            box.style.display = 'block';
+            return;
+          }
+          if (st.missing.length === 0) { box.style.display = 'none'; return; }
+          msg.textContent = 'First-run setup: ' + st.missing.length + ' of ' + st.required +
+            ' local models still need downloading' +
+            (st.hasAnyLlm ? (' (' + st.installed.length + ' model(s) already on this device were kept)') : '') +
+            '. This can be several GB and runs in the background.';
+          renderMissingList(st.missing);
+          dl.style.display = '';
+          dl.disabled = false;
+          dl.textContent = 'Download ' + st.missing.length + ' model' + (st.missing.length > 1 ? 's' : '');
+          box.style.display = 'block';
+        });
+      }
+
+      function startLlmSetup() {
+        var dl = document.getElementById('llm-download-btn');
+        dl.disabled = true;
+        dl.textContent = 'Downloading…';
+        if (!llmSetupWired) {
+          llmSetupWired = true;
+          window.desktop.onLlmProgress(function (p) {
+            var li = document.getElementById(llmCssId(p.tag));
+            if (!li) return;
+            var pct = (p.percent != null) ? (' ' + p.percent + '%') : '';
+            var bytes = p.total ? (' (' + fmtBytes(p.completed) + '/' + fmtBytes(p.total) + ')') : '';
+            li.textContent = p.tag + ' — ' + p.status + pct + bytes;
+          });
+          window.desktop.onLlmModelDone(function (m) {
+            var li = document.getElementById(llmCssId(m.tag));
+            if (li) { li.textContent = m.role + ' — ' + m.tag + ' ✓ installed'; li.classList.add('done'); }
+          });
+        }
+        window.desktop.llmSetup().then(function (final) {
+          if (final.missing.length === 0) {
+            document.getElementById('llm-setup-box').style.display = 'none';
+            refreshProviderStatus();
+          } else {
+            checkFirstRunSetup();
+          }
+        }).catch(function (err) {
+          document.getElementById('llm-setup-msg').textContent = 'Download failed: ' +
+            ((err && err.message) || err) + '. Make sure Ollama is running, then Recheck.';
+          dl.disabled = false;
+          dl.textContent = 'Retry';
+        });
+      }
+
+      function skipLlmSetup() {
+        window.desktop.llmMarkDone().then(function () {
+          document.getElementById('llm-setup-box').style.display = 'none';
+        });
+      }
+
       refreshProviderStatus();
+      checkFirstRunSetup();
     </script>
   </body>
 </html>

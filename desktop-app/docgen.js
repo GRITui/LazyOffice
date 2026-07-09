@@ -141,23 +141,46 @@ function writeXlsx(parsed) {
   return filePath;
 }
 
+const THEME_ACCENT = '2C3E8C';
+const THEME_MUTED = '8B8E97';
+const THEME_RULE = 'D8D5CC';
+const THEME_BRAND = 'LazyOffice';
+
+/**
+ * A light corporate theme applied to every generated deck: an accent-color
+ * title slide, a thin accent band + brand/page-number footer on every
+ * content slide. Slides with chart data (see parseSlidesJson) get a real
+ * native pptxgenjs chart instead of bullets — not an image, an editable
+ * chart object in the .pptx.
+ */
 async function writePptx(parsed) {
   const pres = new PptxGenJS();
 
   const titleSlide = pres.addSlide();
-  titleSlide.addText(parsed.title, { x: 0.6, y: 2.2, w: 8.8, fontSize: 32, bold: true, color: '2C3E8C' });
+  titleSlide.background = { color: THEME_ACCENT };
+  titleSlide.addText(parsed.title, { x: 0.6, y: 2.0, w: 8.8, fontSize: 32, bold: true, color: 'FFFFFF' });
+  titleSlide.addText('Prepared by ' + THEME_BRAND, { x: 0.6, y: 2.9, w: 8.8, fontSize: 14, color: 'D9DEF2' });
 
-  parsed.slides.forEach((slide) => {
+  const totalSlides = parsed.slides.length + 1;
+  parsed.slides.forEach((slide, index) => {
     const s = pres.addSlide();
+    s.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.12, fill: { color: THEME_ACCENT }, line: { color: THEME_ACCENT, width: 0 } });
     if (slide.heading) {
-      s.addText(slide.heading, { x: 0.5, y: 0.35, w: 9, fontSize: 22, bold: true, color: '2C3E8C' });
+      s.addText(slide.heading, { x: 0.5, y: 0.35, w: 9, fontSize: 22, bold: true, color: THEME_ACCENT });
     }
-    if (Array.isArray(slide.bullets) && slide.bullets.length) {
+    if (slide.chart && Array.isArray(slide.chart.categories) && Array.isArray(slide.chart.values)) {
+      s.addChart(pres.ChartType.bar, [
+        { name: slide.heading || 'Data', labels: slide.chart.categories, values: slide.chart.values }
+      ], { x: 0.6, y: 1.2, w: 8.5, h: 4.6, chartColors: [THEME_ACCENT], showValue: true });
+    } else if (Array.isArray(slide.bullets) && slide.bullets.length) {
       s.addText(
         slide.bullets.map((text) => ({ text: text })),
         { x: 0.6, y: 1.2, w: 8.8, fontSize: 16, bullet: true, color: '1A1A1A' }
       );
     }
+    s.addShape(pres.ShapeType.rect, { x: 0, y: 6.9, w: '100%', h: 0.02, fill: { color: THEME_RULE }, line: { color: THEME_RULE, width: 0 } });
+    s.addText(THEME_BRAND, { x: 0.5, y: 6.95, w: 4, fontSize: 9, color: THEME_MUTED });
+    s.addText((index + 2) + ' / ' + totalSlides, { x: 8.7, y: 6.95, w: 1, fontSize: 9, color: THEME_MUTED, align: 'right' });
   });
 
   const filePath = outputPath(parsed.title, 'Untitled Presentation', 'pptx');
@@ -202,9 +225,12 @@ async function generatePresentation(userRequest, attachments) {
   const systemPrompt = 'You are a presentation content generator. Given a user\'s request and any ' +
     'reference material (cite facts from "raw data" items, mirror the structure of an ' +
     '"output template" item, match the tone of a "reference report/presentation" item), ' +
-    'respond ONLY with a JSON object of the form {"title": string, "slides": ' +
-    '[{"heading": string, "bullets": [string, ...]}, ...]}. Keep each slide to 3-5 short ' +
-    'bullets. No markdown, no code fences, no commentary — just the JSON object.';
+    'respond ONLY with a JSON object of the form {"title": string, "slides": [SLIDE, ...]} ' +
+    'where each SLIDE is either {"heading": string, "bullets": [string, ...]} (3-5 short ' +
+    'bullets) or {"heading": string, "chart": {"categories": [string, ...], "values": ' +
+    '[number, ...]}} for a single clear numeric comparison (e.g. a value per category). Use ' +
+    'at most one chart slide, only when the data genuinely supports one. No markdown, no code ' +
+    'fences, no commentary — just the JSON object.';
   const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
   const parsed = await parseSlidesJson(raw);
   const filePath = await writePptx(parsed);
