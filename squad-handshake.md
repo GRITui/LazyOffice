@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T17:24:35Z
+Last Updated: 2026-07-09T18:39:14Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -81,6 +81,18 @@ been built — both tracks so far were implemented directly to prove the end-to-
   window failed to open — added it and re-verified the packaged app launches. Verified:
   14-assertion setup-llm unit test + 7-assertion first-run CDP test (against a fake Ollama),
   passing on BOTH the dev binary and the packaged `.app`.
+
+* `desktop-app/` v0.1.1 — notarization prep (TSK-003, branch `claude/notarize-prep`): wired the
+  full code-signing/notarization path so it's turnkey once an Apple Developer ID cert exists —
+  `build/entitlements.mac.plist` (hardened-runtime entitlements), `hardenedRuntime`/`entitlements`/
+  `gatekeeperAssess` in `build.mac`, and an env-gated `afterSign` hook (`scripts/notarize.js`,
+  `@electron/notarize`) that no-ops without Apple creds (so the unsigned build still works) and
+  auto-notarizes when `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` are set. Verified
+  the unsigned v0.1.1 build still succeeds and the app still launches. README now has a prominent
+  "damaged app" install workaround (`xattr -dr com.apple.quarantine`) — the exact Gatekeeper block
+  the owner hit downloading the unsigned v0.1.0 dmg — plus turnkey signing steps. Version bumped
+  to 0.1.1. Remaining: owner enrolls in Apple Developer Program, then one `npm run dist` produces
+  a notarized dmg that opens with a normal double-click.
 
 ## Blockers & QA Failures
 
