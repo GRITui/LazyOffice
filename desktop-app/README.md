@@ -101,17 +101,36 @@ necessarily on a bare Linux box.
 Remaining before public distribution: code-signing + notarization (needs an Apple Developer
 ID — see below), and a formal QA pass.
 
+## Installing (Apple Silicon)
+
+Download the `.dmg` from the [Releases](https://github.com/GRITui/LazyOffice/releases) page,
+open it, and drag **LazyOffice** to Applications.
+
+> ⚠️ **"LazyOffice is damaged and can't be opened"** — this is expected on the current
+> **unsigned** build, not an actual problem and not a chip mismatch (the app is native
+> arm64). macOS shows this for any app that isn't notarized by Apple once a browser has
+> flagged it as downloaded. **Fix it once:**
+>
+> ```
+> xattr -dr com.apple.quarantine /Applications/LazyOffice.app
+> ```
+>
+> Then open it normally. (A notarized build — see below — removes this step entirely.)
+
+Requires [Ollama](https://ollama.com/download) installed and running for the local default;
+or switch to the Claude API in Settings.
+
 ## Building a macOS app
 
 ```
 npm install
 npm run pack   # unpacked LazyOffice.app in release/mac-arm64/ (no signing — fastest)
-npm run dist   # .dmg + .zip in release/ (still unsigned)
+npm run dist   # .dmg + .zip in release/ (unsigned unless Apple creds are set — see below)
 ```
 
-Both produce an **unsigned** app. macOS Gatekeeper will warn on first open (right-click →
-Open, or `xattr -dr com.apple.quarantine <app>`). Real distribution needs a Developer ID
-cert + notarization — not set up yet.
+Without Apple credentials this produces an **unsigned** app (see the install note above for
+the Gatekeeper workaround). The signing/notarization config is already wired — supplying a
+cert + credentials is all that's needed to get a notarized build.
 
 ### Setup gotcha (Node 26)
 
@@ -130,21 +149,35 @@ printf 'Electron.app/Contents/MacOS/Electron' > node_modules/electron/path.txt
 
 (`electron-builder`'s own extractor is unaffected — `npm run pack`/`dist` work fine.)
 
-## Code-signing & notarization
+## Code-signing & notarization (turnkey — just add a cert)
 
-The build is currently **unsigned** (`electron-builder` reports "0 identities found"), so
-macOS Gatekeeper warns on first open (right-click → Open, or
-`xattr -dr com.apple.quarantine <app>`). To sign + notarize for real distribution you need an
-Apple Developer ID:
+The build config is **fully wired for notarization** — hardened runtime, entitlements
+(`build/entitlements.mac.plist`), and an env-gated `afterSign` notarize hook
+(`scripts/notarize.js`, using `@electron/notarize`). With no credentials it cleanly no-ops
+and produces today's unsigned build; with credentials, `npm run dist` signs **and** notarizes
+automatically. To turn it on:
 
-1. Enroll in the Apple Developer Program and install a "Developer ID Application" certificate
-   in your login keychain.
-2. `electron-builder` auto-detects the identity; for notarization add an
-   `afterSign` notarize hook (`@electron/notarize`) with an app-specific password or an App
-   Store Connect API key, plus `"hardenedRuntime": true` under `build.mac`.
+1. Enroll in the [Apple Developer Program](https://developer.apple.com/programs/) ($99/yr;
+   ~1–2 days to approve) and install a **"Developer ID Application"** certificate in your
+   login keychain (Xcode → Settings → Accounts → Manage Certificates, or download from the
+   developer portal). `electron-builder` auto-detects it.
+2. Create an **app-specific password** at [appleid.apple.com](https://appleid.apple.com) →
+   Sign-In & Security → App-Specific Passwords, and note your **Team ID**
+   (developer.apple.com → Membership).
+3. Set the env vars and build:
 
-Everything else (icon, packaging, entitlements-free runtime) is already in place — only the
-cert + notarize credentials are missing, and those are owner-provided.
+   ```
+   export APPLE_ID="you@example.com"
+   export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+   export APPLE_TEAM_ID="XXXXXXXXXX"
+   npm run dist          # signs with hardened runtime, then notarizes (a few minutes)
+   ```
+
+   (Or use an App Store Connect API key: `APPLE_API_KEY` / `APPLE_API_KEY_ID` /
+   `APPLE_API_ISSUER` instead of the Apple ID trio.)
+
+The resulting `.dmg` opens with a normal double-click on any Mac — no `xattr`, no "damaged"
+prompt. Nothing else in the build needs to change.
 
 ## Known gaps
 
