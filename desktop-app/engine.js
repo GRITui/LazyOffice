@@ -3,9 +3,10 @@
 // easy to compare/sync — the differences are: async/await instead of GAS's
 // synchronous style (native fetch instead of UrlFetchApp), a local JSON
 // config store instead of PropertiesService, and Buffer instead of
-// Utilities.base64Decode/newBlob. generateDoc writes a local .docx instead
-// of calling DocumentApp — this desktop prototype has no Google Drive/Docs
-// dependency at all.
+// Utilities.base64Decode/newBlob. Output generation (document/spreadsheet/
+// presentation) lives in docgen.js and writes local files instead of
+// calling DocumentApp/SpreadsheetApp/SlidesApp — this desktop prototype has
+// no Google Drive dependency at all.
 
 const { ScriptProperties } = require('./config-store');
 
@@ -202,28 +203,19 @@ function parseAttachmentRoles(raw, attachments) {
   return attachments.map((item) => byId[item.id] || { id: item.id, role: 'other', reason: 'Could not classify automatically.' });
 }
 
-function parseDocumentJson(raw) {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      const parsed = JSON.parse(match[0]);
-      if (parsed && parsed.title && Array.isArray(parsed.sections)) {
-        return parsed;
-      }
-    } catch (err) {
-      // fall through to soft fallback below
-    }
-  }
-  return { title: 'Untitled Document', sections: [{ heading: '', body: raw }] };
-}
+const OUTPUT_TYPE_COPY = {
+  document: 'a document: its title and the sections/content it will contain',
+  spreadsheet: 'a spreadsheet: its title and the columns/rows of data it will contain',
+  presentation: 'a presentation: its title and the slides/bullet points it will contain'
+};
 
-async function getPlan(userRequest, attachments) {
+async function getPlan(userRequest, attachments, outputType) {
+  const describe = OUTPUT_TYPE_COPY[outputType] || OUTPUT_TYPE_COPY.document;
   const systemPrompt = 'You are a planning assistant for an office document generator. ' +
     'Given a user\'s request and any reference material provided, respond with a short ' +
-    '(2-4 sentence) plain-language plan describing the document you will create: its ' +
-    'title and the sections/content it will contain. If a reference item is tagged with a ' +
-    'role, use "raw data" items as the source of facts/numbers to cite, mirror the ' +
-    'structure/sections of an "output template" item, and match the tone and format of a ' +
+    '(2-4 sentence) plain-language plan describing ' + describe + '. If a reference item is ' +
+    'tagged with a role, use "raw data" items as the source of facts/numbers to cite, mirror ' +
+    'the structure/sections of an "output template" item, and match the tone and format of a ' +
     '"reference report/presentation" item. Plain sentences only — no code, XML, or markdown ' +
     'formatting.';
   return callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'orchestrator');
@@ -236,7 +228,6 @@ module.exports = {
   buildAttachmentContext,
   classifyAttachments,
   parseAttachmentRoles,
-  parseDocumentJson,
   getPlan,
   OLLAMA_ROLE_MODELS
 };

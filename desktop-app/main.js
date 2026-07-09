@@ -17,9 +17,9 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
-ipcMain.handle('lazyoffice:getPlan', (event, userRequest, attachments) => engine.getPlan(userRequest, attachments));
+ipcMain.handle('lazyoffice:getPlan', (event, userRequest, attachments, outputType) => engine.getPlan(userRequest, attachments, outputType));
 ipcMain.handle('lazyoffice:classifyAttachments', (event, attachments) => engine.classifyAttachments(attachments));
-ipcMain.handle('lazyoffice:generateDoc', (event, userRequest, attachments) => docgen.generateDoc(userRequest, attachments));
+ipcMain.handle('lazyoffice:generateOutput', (event, userRequest, attachments, outputType) => docgen.generateOutput(userRequest, attachments, outputType));
 ipcMain.handle('lazyoffice:openInFinder', (event, filePath) => shell.showItemInFolder(filePath));
 
 const SETTINGS_KEYS = [

@@ -248,13 +248,34 @@
         border-radius: var(--radius);
       }
       .settings-hint { font-size: 12px; color: var(--text-muted); margin: 2px 0 0; }
+      .type-select {
+        display: inline-flex;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        margin-bottom: 16px;
+      }
+      .type-btn {
+        background: var(--surface);
+        color: var(--text-muted);
+        border: none;
+        border-radius: 0;
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        border-right: 1px solid var(--border);
+      }
+      .type-btn:last-child { border-right: none; }
+      .type-btn:hover:not(:disabled) { background: var(--bg); }
+      .type-btn.active { background: var(--accent); color: var(--accent-text); }
+      .type-btn.active:hover { background: var(--accent); }
     </style>
   </head>
   <body>
     <div class="header-row">
       <div>
         <h1>LazyOffice — Document Assistant</h1>
-        <p class="subtitle">Describe the document you want, review the plan, then approve to generate a local .docx file.</p>
+        <p class="subtitle" id="subtitle">Describe the document you want, review the plan, then approve to generate a local .docx file.</p>
       </div>
       <button type="button" class="settings-toggle" onclick="toggleSettings()">Settings</button>
     </div>
@@ -296,6 +317,12 @@
       </div>
     </div>
 
+    <div class="type-select" role="radiogroup" aria-label="Output type">
+      <button type="button" class="type-btn active" data-type="document" onclick="selectOutputType('document')" aria-pressed="true">Document</button>
+      <button type="button" class="type-btn" data-type="spreadsheet" onclick="selectOutputType('spreadsheet')" aria-pressed="false">Spreadsheet</button>
+      <button type="button" class="type-btn" data-type="presentation" onclick="selectOutputType('presentation')" aria-pressed="false">Presentation</button>
+    </div>
+
     <textarea id="request" rows="3" placeholder="e.g. Generate a one-page project status update for the LazyOffice MVP"></textarea>
 
     <p class="field-label">Reference files (optional)</p>
@@ -333,7 +360,7 @@
     </div>
 
     <div id="result-box" class="card">
-      <p class="card-label">Document ready</p>
+      <p class="card-label" id="result-label">Document ready</p>
       <p id="doc-path"></p>
       <div class="actions">
         <button class="secondary" onclick="openInFinder()">Show in Finder</button>
@@ -349,8 +376,28 @@
     <script>
       var currentRequest = '';
       var currentDocPath = '';
+      var outputType = 'document';
       var attachments = []; // { id, type: 'file'|'link', name, mimeType, size, base64, url }
       var MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+      var OUTPUT_TYPES = {
+        document: { label: 'Document', noun: 'document', extension: '.docx', placeholder: 'e.g. Generate a one-page project status update for the LazyOffice MVP' },
+        spreadsheet: { label: 'Spreadsheet', noun: 'spreadsheet', extension: '.xlsx', placeholder: 'e.g. Build a spreadsheet of Q3 sales by region' },
+        presentation: { label: 'Presentation', noun: 'presentation', extension: '.pptx', placeholder: 'e.g. Create a 5-slide deck summarizing the LazyOffice roadmap' }
+      };
+
+      function selectOutputType(type) {
+        outputType = type;
+        Array.prototype.forEach.call(document.querySelectorAll('.type-btn'), function (btn) {
+          var isActive = btn.getAttribute('data-type') === type;
+          btn.classList.toggle('active', isActive);
+          btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+        var meta = OUTPUT_TYPES[type];
+        document.getElementById('subtitle').textContent =
+          'Describe the ' + meta.noun + ' you want, review the plan, then approve to generate a local ' + meta.extension + ' file.';
+        document.getElementById('request').placeholder = meta.placeholder;
+      }
 
       var ROLE_OPTIONS = [
         { value: 'raw_data', label: 'Raw data' },
@@ -586,7 +633,7 @@
         setStatus('Thinking through a plan...', false, true);
         document.getElementById('plan-btn').disabled = true;
 
-        callServer('getPlan', [currentRequest, attachments], function (plan) {
+        callServer('getPlan', [currentRequest, attachments, outputType], function (plan) {
           document.getElementById('plan-text').textContent = plan;
           document.getElementById('plan-box').style.display = 'block';
           setStatus('', false, false);
@@ -598,12 +645,14 @@
       }
 
       function approve() {
-        setStatus('Generating your document...', false, true);
+        var noun = OUTPUT_TYPES[outputType].noun;
+        setStatus('Generating your ' + noun + '...', false, true);
         document.getElementById('approve-btn').disabled = true;
 
-        callServer('generateDoc', [currentRequest, attachments], function (filePath) {
+        callServer('generateOutput', [currentRequest, attachments, outputType], function (filePath) {
           currentDocPath = filePath;
           document.getElementById('doc-path').textContent = filePath;
+          document.getElementById('result-label').textContent = OUTPUT_TYPES[outputType].label + ' ready';
           document.getElementById('result-box').style.display = 'block';
           setStatus('', false, false);
           document.getElementById('approve-btn').disabled = false;
