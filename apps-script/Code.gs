@@ -7,6 +7,50 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+var LLM_PROVIDER_DEFAULT = 'claude'; // 'claude' | 'ollama'
+var OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
+var OLLAMA_MODEL_DEFAULT = 'llama3.1:8b';
+
+/**
+ * The First Goal doc's 5-agent pipeline
+ * (docs.google.com/document/d/1uwIf6bRwaxKr2qdgNLjm2XJdV1aszLcSbED252N8uXQ), mapped to a
+ * script property (so each role's local model is independently configurable) and a default
+ * Ollama tag (verified against the Ollama library). Milestone 1 only calls 3 of the 5 roles
+ * today — orchestrator (getPlan), planner (classifyAttachments), code_engine (generateDoc) —
+ * since the full sequential relay is TSK-002. syntax_enforcer and generalist have no call
+ * site yet; their models are configured here so a local Ollama setup already has all 5
+ * pulled and ready once TSK-002 wires up the remaining stages.
+ */
+var OLLAMA_ROLE_MODELS = {
+  orchestrator: { property: 'OLLAMA_ORCHESTRATOR_MODEL', label: 'Qwen3.5-9B', ollamaTag: 'qwen3.5:9b' },
+  planner: { property: 'OLLAMA_PLANNER_MODEL', label: 'DeepSeek-R1-Distill-Qwen-7B', ollamaTag: 'deepseek-r1:7b' },
+  syntax_enforcer: { property: 'OLLAMA_SYNTAX_MODEL', label: 'Phi-4-mini (3.8B)', ollamaTag: 'phi4-mini:3.8b' },
+  code_engine: { property: 'OLLAMA_CODE_ENGINE_MODEL', label: 'IBM Granite 4.1 8B', ollamaTag: 'granite4.1:8b' },
+  generalist: { property: 'OLLAMA_GENERALIST_MODEL', label: 'Llama 3.1 8B Instruct', ollamaTag: 'llama3.1:8b' }
+};
+
+/**
+ * Single entry point every stage calls instead of callClaude directly.
+ * Dispatches on the LLM_PROVIDER script property (defaults to "claude"). Set it to "ollama"
+ * to point this prototype at a local Ollama server for iteration without an Anthropic API
+ * key — configure OLLAMA_URL plus the per-role OLLAMA_*_MODEL properties (see
+ * OLLAMA_ROLE_MODELS) to match your setup. This does not change the default provider (owner
+ * confirmed 2026-07-09 staying on Claude); it's a local-only dev toggle, not a swap to
+ * another hosted LLM API. A deployed GAS Web App runs in Google's cloud and cannot reach
+ * "localhost" on your machine, so "ollama" mode only works when OLLAMA_URL is a reachable
+ * address (e.g. a tunnel), or when testing outside a real deployment.
+ *
+ * `role` should be one of OLLAMA_ROLE_MODELS's keys (orchestrator/planner/syntax_enforcer/
+ * code_engine/generalist); it's ignored by the Claude path, which uses a single model.
+ */
+function callLLM(systemPrompt, userPrompt, role) {
+  var provider = PropertiesService.getScriptProperties().getProperty('LLM_PROVIDER') || LLM_PROVIDER_DEFAULT;
+  if (provider === 'ollama') {
+    return callOllama(systemPrompt, userPrompt, role);
+  }
+  return callClaude(systemPrompt, userPrompt);
+}
+
 /**
  * Milestone 1 stand-in for the First Goal doc's 5-model pipeline. Owner
  * confirmed (2026-07-09) staying on the Claude API for now rather than
@@ -48,27 +92,81 @@ function callClaude(systemPrompt, userPrompt) {
 }
 
 /**
+ * Local Ollama backend (OpenAI-compatible /v1/chat/completions), used only
+ * when the LLM_PROVIDER script property is set to "ollama". No API key
+ * required. See callLLM's comment for the localhost-reachability caveat.
+ *
+ * Model resolution order: the role's own script property (e.g.
+ * OLLAMA_ORCHESTRATOR_MODEL) → that role's default Ollama tag in
+ * OLLAMA_ROLE_MODELS → the legacy single OLLAMA_MODEL property → its default.
+ * The legacy fallback lets a caller with no role, or a role missing from
+ * OLLAMA_ROLE_MODELS, still work off one general-purpose model.
+ */
+function callOllama(systemPrompt, userPrompt, role) {
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
+  var roleConfig = OLLAMA_ROLE_MODELS[role];
+  var model = (roleConfig && props.getProperty(roleConfig.property)) ||
+    (roleConfig && roleConfig.ollamaTag) ||
+    props.getProperty('OLLAMA_MODEL') ||
+    OLLAMA_MODEL_DEFAULT;
+
+  var payload = {
+    model: model,
+    max_tokens: 1024,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ]
+  };
+
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  var code = response.getResponseCode();
+  if (code !== 200) {
+    throw new Error('Ollama error ' + code + ': ' + response.getContentText());
+  }
+
+  var body = JSON.parse(response.getContentText());
+  if (!body.choices || !body.choices[0] || !body.choices[0].message) {
+    throw new Error('Unexpected Ollama response shape: ' + response.getContentText().slice(0, 300));
+  }
+  return body.choices[0].message.content;
+}
+
+/**
  * Stage 1 of the HITL flow: draft a short plain-language plan for the owner
  * to approve before anything is created in Drive.
  */
-function getPlan(userRequest) {
+function getPlan(userRequest, attachments) {
   var systemPrompt = 'You are a planning assistant for an office document generator. ' +
-    'Given a user\'s request, respond with a short (2-4 sentence) plain-language plan ' +
-    'describing the Google Doc you will create: its title and the sections/content it ' +
-    'will contain. Plain sentences only — no code, XML, or markdown formatting.';
-  return callClaude(systemPrompt, userRequest);
+    'Given a user\'s request and any reference material provided, respond with a short ' +
+    '(2-4 sentence) plain-language plan describing the Google Doc you will create: its ' +
+    'title and the sections/content it will contain. If a reference item is tagged with a ' +
+    'role, use "raw data" items as the source of facts/numbers to cite, mirror the ' +
+    'structure/sections of an "output template" item, and match the tone and format of a ' +
+    '"reference report/presentation" item. Plain sentences only — no code, XML, or markdown ' +
+    'formatting.';
+  return callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'orchestrator');
 }
 
 /**
  * Stage 2 of the HITL flow, run only after owner approval: draft document
  * content and create the real Google Doc.
  */
-function generateDoc(userRequest) {
-  var systemPrompt = 'You are a document content generator. Given a user\'s request, ' +
-    'respond ONLY with a JSON object of the form ' +
+function generateDoc(userRequest, attachments) {
+  var systemPrompt = 'You are a document content generator. Given a user\'s request and any ' +
+    'reference material (cite facts from "raw data" items, mirror the structure of an ' +
+    '"output template" item, match the tone/format of a "reference report/presentation" ' +
+    'item), respond ONLY with a JSON object of the form ' +
     '{"title": string, "sections": [{"heading": string, "body": string}]}. ' +
     'No markdown, no code fences, no commentary — just the JSON object.';
-  var raw = callClaude(systemPrompt, userRequest);
+  var raw = callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
   var parsed = parseDocumentJson(raw);
 
   var doc = DocumentApp.create(parsed.title);
@@ -85,6 +183,125 @@ function generateDoc(userRequest) {
   });
   doc.saveAndClose();
   return doc.getUrl();
+}
+
+var MAX_INLINE_TEXT_CHARS = 4000;
+var TEXT_MIME_PATTERN = /^text\/|json$|csv$/;
+var TEXT_FILENAME_PATTERN = /\.(txt|md|csv|json)$/i;
+var ROLE_VALUES = ['raw_data', 'template', 'reference_report', 'other'];
+var ROLE_LABELS = {
+  raw_data: 'raw data',
+  template: 'output template',
+  reference_report: 'reference report/presentation',
+  other: 'other reference'
+};
+
+/**
+ * Turns UI-attached files/links into extra prompt context. Follows the
+ * Squad Setup doc's crash-proofing convention: best-effort per item, skip
+ * or degrade to a filename-only reference instead of throwing on anything
+ * unreadable or binary.
+ */
+function buildAttachmentContext(attachments) {
+  if (!attachments || !attachments.length) {
+    return '';
+  }
+  var parts = [];
+  attachments.forEach(function (item) {
+    if (!item) return;
+    var roleTag = item.role ? ' [role: ' + (ROLE_LABELS[item.role] || item.role) + ']' : '';
+    if (item.type === 'link' && item.url) {
+      parts.push('Reference link' + roleTag + ': ' + item.url);
+      return;
+    }
+    if (item.type === 'file' && item.name) {
+      var isText = TEXT_MIME_PATTERN.test(item.mimeType || '') || TEXT_FILENAME_PATTERN.test(item.name);
+      if (isText && item.base64) {
+        try {
+          var text = Utilities.newBlob(Utilities.base64Decode(item.base64)).getDataAsString();
+          parts.push('Reference file "' + item.name + '"' + roleTag + ' contents:\n' + text.slice(0, MAX_INLINE_TEXT_CHARS));
+          return;
+        } catch (err) {
+          // fall through to filename-only reference below
+        }
+      }
+      parts.push('Reference file "' + item.name + '"' + roleTag + ' (' + (item.mimeType || 'unknown type') +
+        ') — content not inlined; treat as contextual reference only.');
+    }
+  });
+  return parts.length ? '\n\nReference material provided by the user:\n' + parts.join('\n\n') : '';
+}
+
+/**
+ * Classifies each UI-attached file/link as raw data, an output template, a
+ * reference report/presentation, or other — so the plan/generate stages can
+ * treat each attachment according to its actual purpose instead of lumping
+ * them all together. The UI shows this to the owner for confirmation before
+ * drafting the plan.
+ */
+function classifyAttachments(attachments) {
+  if (!attachments || !attachments.length) {
+    return [];
+  }
+  var systemPrompt = 'You classify reference files/links attached to a document-generation ' +
+    'request. For each item, decide which single role it plays: "raw_data" (source ' +
+    'numbers/facts to pull from), "template" (defines the structure, sections, or ' +
+    'formatting the output should follow), "reference_report" (an example finished ' +
+    'report/presentation similar to the desired final output), or "other" (none of the ' +
+    'above). Respond ONLY with a JSON array of objects shaped ' +
+    '{"id": string, "role": "raw_data"|"template"|"reference_report"|"other", ' +
+    '"reason": string (max 12 words)}. No markdown, no commentary — just the JSON array.';
+
+  var userPrompt = 'Classify these attachments:\n\n' + attachments.map(function (item) {
+    if (item.type === 'link') {
+      return 'id: ' + item.id + '\nlink: ' + item.url;
+    }
+    var descriptor = 'id: ' + item.id + '\nfilename: ' + item.name + '\ntype: ' + (item.mimeType || 'unknown');
+    var isText = TEXT_MIME_PATTERN.test(item.mimeType || '') || TEXT_FILENAME_PATTERN.test(item.name || '');
+    if (isText && item.base64) {
+      try {
+        var text = Utilities.newBlob(Utilities.base64Decode(item.base64)).getDataAsString();
+        descriptor += '\nexcerpt: ' + text.slice(0, 500);
+      } catch (err) {
+        // no excerpt available; classify on filename/type alone
+      }
+    }
+    return descriptor;
+  }).join('\n\n');
+
+  var raw = callLLM(systemPrompt, userPrompt, 'planner');
+  return parseAttachmentRoles(raw, attachments);
+}
+
+/**
+ * Soft-fallback parsing of the role-classification response: pull the JSON
+ * array out with a regex, validate each entry, and default anything
+ * missing/malformed to "other" rather than throwing.
+ */
+function parseAttachmentRoles(raw, attachments) {
+  var byId = {};
+  var match = raw.match(/\[[\s\S]*\]/);
+  if (match) {
+    try {
+      var parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(function (entry) {
+          if (entry && entry.id) {
+            byId[entry.id] = {
+              id: entry.id,
+              role: ROLE_VALUES.indexOf(entry.role) !== -1 ? entry.role : 'other',
+              reason: typeof entry.reason === 'string' ? entry.reason : 'Could not classify automatically.'
+            };
+          }
+        });
+      }
+    } catch (err) {
+      // fall through to per-item fallback below
+    }
+  }
+  return attachments.map(function (item) {
+    return byId[item.id] || { id: item.id, role: 'other', reason: 'Could not classify automatically.' };
+  });
 }
 
 /**
