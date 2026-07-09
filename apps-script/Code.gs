@@ -51,24 +51,25 @@ function callClaude(systemPrompt, userPrompt) {
  * Stage 1 of the HITL flow: draft a short plain-language plan for the owner
  * to approve before anything is created in Drive.
  */
-function getPlan(userRequest) {
+function getPlan(userRequest, attachments) {
   var systemPrompt = 'You are a planning assistant for an office document generator. ' +
-    'Given a user\'s request, respond with a short (2-4 sentence) plain-language plan ' +
-    'describing the Google Doc you will create: its title and the sections/content it ' +
-    'will contain. Plain sentences only — no code, XML, or markdown formatting.';
-  return callClaude(systemPrompt, userRequest);
+    'Given a user\'s request and any reference material provided, respond with a short ' +
+    '(2-4 sentence) plain-language plan describing the Google Doc you will create: its ' +
+    'title and the sections/content it will contain. Plain sentences only — no code, XML, ' +
+    'or markdown formatting.';
+  return callClaude(systemPrompt, userRequest + buildAttachmentContext(attachments));
 }
 
 /**
  * Stage 2 of the HITL flow, run only after owner approval: draft document
  * content and create the real Google Doc.
  */
-function generateDoc(userRequest) {
+function generateDoc(userRequest, attachments) {
   var systemPrompt = 'You are a document content generator. Given a user\'s request, ' +
     'respond ONLY with a JSON object of the form ' +
     '{"title": string, "sections": [{"heading": string, "body": string}]}. ' +
     'No markdown, no code fences, no commentary — just the JSON object.';
-  var raw = callClaude(systemPrompt, userRequest);
+  var raw = callClaude(systemPrompt, userRequest + buildAttachmentContext(attachments));
   var parsed = parseDocumentJson(raw);
 
   var doc = DocumentApp.create(parsed.title);
@@ -85,6 +86,45 @@ function generateDoc(userRequest) {
   });
   doc.saveAndClose();
   return doc.getUrl();
+}
+
+var MAX_INLINE_TEXT_CHARS = 4000;
+var TEXT_MIME_PATTERN = /^text\/|json$|csv$/;
+var TEXT_FILENAME_PATTERN = /\.(txt|md|csv|json)$/i;
+
+/**
+ * Turns UI-attached files/links into extra prompt context. Follows the
+ * Squad Setup doc's crash-proofing convention: best-effort per item, skip
+ * or degrade to a filename-only reference instead of throwing on anything
+ * unreadable or binary.
+ */
+function buildAttachmentContext(attachments) {
+  if (!attachments || !attachments.length) {
+    return '';
+  }
+  var parts = [];
+  attachments.forEach(function (item) {
+    if (!item) return;
+    if (item.type === 'link' && item.url) {
+      parts.push('Reference link: ' + item.url);
+      return;
+    }
+    if (item.type === 'file' && item.name) {
+      var isText = TEXT_MIME_PATTERN.test(item.mimeType || '') || TEXT_FILENAME_PATTERN.test(item.name);
+      if (isText && item.base64) {
+        try {
+          var text = Utilities.newBlob(Utilities.base64Decode(item.base64)).getDataAsString();
+          parts.push('Reference file "' + item.name + '" contents:\n' + text.slice(0, MAX_INLINE_TEXT_CHARS));
+          return;
+        } catch (err) {
+          // fall through to filename-only reference below
+        }
+      }
+      parts.push('Reference file "' + item.name + '" (' + (item.mimeType || 'unknown type') +
+        ') — content not inlined; treat as contextual reference only.');
+    }
+  });
+  return parts.length ? '\n\nReference material provided by the user:\n' + parts.join('\n\n') : '';
 }
 
 /**
