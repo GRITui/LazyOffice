@@ -21,3 +21,13 @@ Do not edit outside the XML tags. PM Agents must only parse items marked READY_F
   <description>Stand up a GPU-backed inference server on owned/on-prem hardware (e.g. vLLM/Ollama) reachable over HTTP from Google Apps Script, serving the First Goal doc's pipeline models. Load Qwen3.5-9B (Orchestrator) first, then the remaining models (DeepSeek-R1-Distill-Qwen-7B Planner, Phi-4-mini Syntax Enforcer, Granite 4.1 8B Code Engine, Llama 3.1 8B Generalist), then replace the Milestone 1 Claude stand-in.</description>
   <researcher_notes>Owner decision (2026-07-09): host on own hardware (not cloud GPU); load Qwen3.5-9B Orchestrator first to prove the routing/coordination layer, then the remaining 4 models. Networking so GAS can reach the on-prem server is still open and owned by Researcher-Squad/Engineer-Squad.</researcher_notes>
 </task_item>
+
+<task_item>
+  <id>TSK-003</id>
+  <source>OWNER_POPUP</source>
+  <status>IN_PROGRESS</status>
+  <priority>MEDIUM</priority>
+  <title>Desktop app prototype (macOS) — parallel track alongside the GAS Web App</title>
+  <description>Electron-based desktop prototype living in desktop-app/, reusing the chat -> plan -> approve UI. engine.js ports Code.gs's LLM logic (same callLLM/callClaude/callOllama shape, same 5-model OLLAMA_ROLE_MODELS mapping from the First Goal doc). No Google Drive/Docs dependency: generateDoc writes a real local .docx via the docx npm package instead of calling DocumentApp. Settings (API key, LLM_PROVIDER, Ollama URL/models) are entered in an in-app panel backed by a local JSON config store instead of GAS Script Properties.</description>
+  <researcher_notes>Owner decision (2026-07-09): work this as a parallel project, not blocking or replacing the GAS webapp track — webapp work is paused and resumes later (see squad-handshake.md). Chose local .docx output over the Google Docs API to avoid adding Google OAuth to a desktop app. Scaffolded and logic-tested (getPlan/classifyAttachments/generateDoc all verified against local stand-in Claude/Ollama servers, including a real .docx written and validated as a well-formed OOXML package). Not yet run inside an actual Electron window or packaged for macOS — installing the electron binary needs network access to its download CDN, unavailable in the sandbox this was built in.</researcher_notes>
+</task_item>

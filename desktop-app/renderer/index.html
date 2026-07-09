@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LazyOffice — Document Assistant</title>
+    <style>
+      :root {
+        --bg: #f7f8fa;
+        --surface: #ffffff;
+        --border: #e0e3e8;
+        --text: #1f2430;
+        --text-muted: #5f6675;
+        --accent: #3457d5;
+        --accent-hover: #2941ac;
+        --accent-text: #ffffff;
+        --error-bg: #fdecea;
+        --error-border: #f3c2bd;
+        --error-text: #9c2a1f;
+        --success-text: #1a7f4e;
+        --highlight-bg: #fff6da;
+        --highlight-border: #f0dd9c;
+        --radius: 10px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14161c;
+          --surface: #1d2029;
+          --border: #2c303c;
+          --text: #eceef2;
+          --text-muted: #9aa0ae;
+          --accent: #6a86ff;
+          --accent-hover: #8299ff;
+          --accent-text: #0c0e14;
+          --error-bg: #3a1f1c;
+          --error-border: #6b332c;
+          --error-text: #ff9a8c;
+          --success-text: #5fd996;
+          --highlight-bg: #332b13;
+          --highlight-border: #665423;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        max-width: 640px;
+        margin: 40px auto;
+        padding: 0 16px;
+        color: var(--text);
+        background: var(--bg);
+      }
+      h1 { font-size: 21px; margin-bottom: 4px; }
+      .subtitle { color: var(--text-muted); font-size: 14px; margin-top: 0; }
+      .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+      .settings-toggle {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 600;
+        padding: 6px 12px;
+        white-space: nowrap;
+      }
+      .settings-toggle:hover:not(:disabled) { background: var(--surface); }
+      .provider-status { font-size: 12px; color: var(--text-muted); margin: 4px 0 16px; }
+      textarea {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 14px;
+        font-family: inherit;
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        resize: vertical;
+      }
+      textarea:focus, button:focus-visible, input:focus-visible, select:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+      button {
+        padding: 9px 18px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        border-radius: var(--radius);
+        background: var(--accent);
+        color: var(--accent-text);
+        transition: background 0.15s ease;
+      }
+      button:hover:not(:disabled) { background: var(--accent-hover); }
+      button:disabled { cursor: default; opacity: 0.55; }
+      button.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      button.secondary:hover:not(:disabled) { background: var(--surface); }
+      .card {
+        margin-top: 18px;
+        padding: 16px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        display: none;
+      }
+      .card-label {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin: 0 0 8px;
+      }
+      #plan-text { margin: 0 0 12px; line-height: 1.5; white-space: pre-wrap; }
+      #result-box .card-label { color: var(--success-text); }
+      #doc-path { font-weight: 600; word-break: break-all; margin: 0 0 12px; font-size: 13px; }
+      #status {
+        margin-top: 14px;
+        font-size: 13px;
+        color: var(--text-muted);
+        min-height: 1.2em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #status.error { color: var(--error-text); }
+      .spinner {
+        width: 13px;
+        height: 13px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        display: none;
+        animation: spin 0.7s linear infinite;
+      }
+      .spinner.visible { display: inline-block; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .field-label {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin: 18px 0 6px;
+      }
+      .dropzone {
+        border: 2px dashed var(--border);
+        border-radius: var(--radius);
+        padding: 18px;
+        text-align: center;
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 13px;
+        background: var(--surface);
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+      .dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); }
+      .dropzone.dragover { border-color: var(--accent); background: var(--highlight-bg); color: var(--text); }
+      .dropzone-browse { color: var(--accent); font-weight: 600; text-decoration: underline; }
+      .dropzone p { margin: 0; }
+      .link-row { display: flex; gap: 8px; margin-top: 10px; }
+      .link-row input[type="text"] {
+        flex: 1;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+      .attachment-list {
+        list-style: none;
+        margin: 10px 0 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .attachment-list li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 10px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 13px;
+        word-break: break-all;
+      }
+      .attachment-list .remove-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        font-size: 16px;
+        line-height: 1;
+        padding: 0 4px;
+        margin: 0;
+        cursor: pointer;
+      }
+      .attachment-list .remove-btn:hover { color: var(--error-text); background: transparent; }
+      .roles-hint { margin: 0 0 10px; font-size: 13px; color: var(--text-muted); }
+      .roles-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+      .roles-list li {
+        padding: 10px 12px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .roles-item-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .roles-item-name { font-size: 13px; font-weight: 600; word-break: break-all; }
+      .roles-item-top select {
+        font-size: 13px;
+        font-family: inherit;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--text);
+      }
+      .roles-item-reason { margin: 6px 0 0; font-size: 12px; color: var(--text-muted); font-style: italic; }
+      .settings-field { margin-top: 12px; }
+      .settings-field label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+      .settings-field input, .settings-field select {
+        width: 100%;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+      .settings-hint { font-size: 12px; color: var(--text-muted); margin: 2px 0 0; }
+    </style>
+  </head>
+  <body>
+    <div class="header-row">
+      <div>
+        <h1>LazyOffice — Document Assistant</h1>
+        <p class="subtitle">Describe the document you want, review the plan, then approve to generate a local .docx file.</p>
+      </div>
+      <button type="button" class="settings-toggle" onclick="toggleSettings()">Settings</button>
+    </div>
+    <p class="provider-status" id="provider-status"></p>
+
+    <div id="settings-box" class="card">
+      <p class="card-label">Settings</p>
+      <div class="settings-field">
+        <label for="setting-provider">LLM provider</label>
+        <select id="setting-provider">
+          <option value="claude">Claude API</option>
+          <option value="ollama">Local Ollama</option>
+        </select>
+      </div>
+      <div class="settings-field">
+        <label for="setting-api-key">Anthropic API key</label>
+        <input type="password" id="setting-api-key" placeholder="sk-ant-...">
+      </div>
+      <div class="settings-field">
+        <label for="setting-ollama-url">Ollama URL</label>
+        <input type="text" id="setting-ollama-url" placeholder="http://localhost:11434/v1/chat/completions">
+      </div>
+      <div class="settings-field">
+        <label for="setting-orchestrator-model">Orchestrator model (Ollama)</label>
+        <input type="text" id="setting-orchestrator-model" placeholder="qwen3.5:9b">
+      </div>
+      <div class="settings-field">
+        <label for="setting-planner-model">Planner model (Ollama)</label>
+        <input type="text" id="setting-planner-model" placeholder="deepseek-r1:7b">
+      </div>
+      <div class="settings-field">
+        <label for="setting-code-engine-model">Code Engine model (Ollama)</label>
+        <input type="text" id="setting-code-engine-model" placeholder="granite4.1:8b">
+      </div>
+      <p class="settings-hint">Ollama fields are only used when the provider above is "Local Ollama". Leave a model field blank to use its default tag.</p>
+      <div class="actions">
+        <button id="save-settings-btn" onclick="saveSettings()">Save</button>
+        <button class="secondary" onclick="toggleSettings()">Close</button>
+      </div>
+    </div>
+
+    <textarea id="request" rows="3" placeholder="e.g. Generate a one-page project status update for the LazyOffice MVP"></textarea>
+
+    <p class="field-label">Reference files (optional)</p>
+    <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Add reference files">
+      <p>Drag &amp; drop files here, or <span class="dropzone-browse">click to browse</span> (max 4MB each)</p>
+      <input type="file" id="file-input" multiple hidden>
+    </div>
+    <div class="link-row">
+      <input type="text" id="link-input" placeholder="Or paste a link (e.g. a reference URL)">
+      <button type="button" class="secondary" onclick="addLink()">Add Link</button>
+    </div>
+    <ul id="attachment-list" class="attachment-list"></ul>
+
+    <div class="actions">
+      <button id="plan-btn" onclick="requestPlan()">Get Plan</button>
+    </div>
+
+    <div id="roles-box" class="card">
+      <p class="card-label">Confirm file roles</p>
+      <p class="roles-hint">I'll use these to draft the plan — adjust any that look wrong, then confirm.</p>
+      <ul id="roles-list" class="roles-list"></ul>
+      <div class="actions">
+        <button id="confirm-roles-btn" onclick="confirmRolesAndDraftPlan()">Confirm &amp; Draft Plan</button>
+        <button class="secondary" onclick="cancelRoleReview()">Back</button>
+      </div>
+    </div>
+
+    <div id="plan-box" class="card">
+      <p class="card-label">Proposed plan</p>
+      <p id="plan-text"></p>
+      <div class="actions">
+        <button id="approve-btn" onclick="approve()">Approve &amp; Generate</button>
+        <button class="secondary" onclick="resetFlow()">Start Over</button>
+      </div>
+    </div>
+
+    <div id="result-box" class="card">
+      <p class="card-label">Document ready</p>
+      <p id="doc-path"></p>
+      <div class="actions">
+        <button class="secondary" onclick="openInFinder()">Show in Finder</button>
+        <button class="secondary" onclick="resetFlow()">Create Another</button>
+      </div>
+    </div>
+
+    <div id="status">
+      <span class="spinner" id="spinner"></span>
+      <span id="status-text"></span>
+    </div>
+
+    <script>
+      var currentRequest = '';
+      var currentDocPath = '';
+      var attachments = []; // { id, type: 'file'|'link', name, mimeType, size, base64, url }
+      var MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+      var ROLE_OPTIONS = [
+        { value: 'raw_data', label: 'Raw data' },
+        { value: 'template', label: 'Output template' },
+        { value: 'reference_report', label: 'Reference report/presentation' },
+        { value: 'other', label: 'Other' }
+      ];
+
+      // Every server call goes straight to the real backend over Electron's
+      // IPC bridge (see preload.js) — no mock/detection branch, since a
+      // desktop app always has a real engine behind it.
+      function callServer(fnName, args, onSuccess, onError) {
+        window.desktop[fnName].apply(null, args)
+          .then(onSuccess)
+          .catch(function (err) { onError({ message: (err && err.message) || String(err) }); });
+      }
+
+      function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+
+      function renderAttachments() {
+        var list = document.getElementById('attachment-list');
+        list.innerHTML = '';
+        attachments.forEach(function (a) {
+          var li = document.createElement('li');
+          var label = document.createElement('span');
+          label.textContent = a.type === 'file' ? (a.name + ' (' + formatSize(a.size) + ')') : a.url;
+          var removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.className = 'remove-btn';
+          removeBtn.setAttribute('aria-label', 'Remove ' + (a.type === 'file' ? a.name : a.url));
+          removeBtn.textContent = '×';
+          removeBtn.onclick = function () { removeAttachment(a.id); };
+          li.appendChild(label);
+          li.appendChild(removeBtn);
+          list.appendChild(li);
+        });
+      }
+
+      function removeAttachment(id) {
+        attachments = attachments.filter(function (a) { return a.id !== id; });
+        renderAttachments();
+      }
+
+      function applyRoles(roles) {
+        var byId = {};
+        (roles || []).forEach(function (r) { byId[r.id] = r; });
+        attachments.forEach(function (a) {
+          var match = byId[a.id];
+          a.role = (match && match.role) || 'other';
+          a.roleReason = (match && match.reason) || 'Could not classify automatically — please check.';
+        });
+      }
+
+      function renderRolesList() {
+        var list = document.getElementById('roles-list');
+        list.innerHTML = '';
+        attachments.forEach(function (a) {
+          var li = document.createElement('li');
+
+          var top = document.createElement('div');
+          top.className = 'roles-item-top';
+          var label = document.createElement('span');
+          label.className = 'roles-item-name';
+          label.textContent = a.type === 'file' ? a.name : a.url;
+          var select = document.createElement('select');
+          select.setAttribute('aria-label', 'Role for ' + (a.type === 'file' ? a.name : a.url));
+          ROLE_OPTIONS.forEach(function (opt) {
+            var o = document.createElement('option');
+            o.value = opt.value;
+            o.textContent = opt.label;
+            if (a.role === opt.value) o.selected = true;
+            select.appendChild(o);
+          });
+          select.onchange = function () { a.role = select.value; };
+          top.appendChild(label);
+          top.appendChild(select);
+
+          var reason = document.createElement('p');
+          reason.className = 'roles-item-reason';
+          reason.textContent = a.roleReason || '';
+
+          li.appendChild(top);
+          li.appendChild(reason);
+          list.appendChild(li);
+        });
+      }
+
+      function makeId() {
+        return Date.now().toString(36) + Math.random().toString(36).slice(2);
+      }
+
+      function handleFiles(fileList) {
+        Array.prototype.forEach.call(fileList, function (file) {
+          if (file.size > MAX_FILE_BYTES) {
+            setStatus('"' + file.name + '" is over the 4MB limit and was skipped.', true, false);
+            return;
+          }
+          var reader = new FileReader();
+          reader.onload = function () {
+            var base64 = String(reader.result).split(',')[1] || '';
+            attachments.push({
+              id: makeId(),
+              type: 'file',
+              name: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              size: file.size,
+              base64: base64
+            });
+            renderAttachments();
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function addLink() {
+        var input = document.getElementById('link-input');
+        var url = input.value.trim();
+        if (!url) return;
+        try {
+          new URL(url);
+        } catch (err) {
+          setStatus('That doesn\'t look like a valid URL.', true, false);
+          return;
+        }
+        attachments.push({ id: makeId(), type: 'link', url: url });
+        input.value = '';
+        renderAttachments();
+      }
+
+      var dropzone = document.getElementById('dropzone');
+      var fileInput = document.getElementById('file-input');
+
+      dropzone.addEventListener('click', function () { fileInput.click(); });
+      dropzone.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          fileInput.click();
+        }
+      });
+      fileInput.addEventListener('change', function (e) {
+        handleFiles(e.target.files);
+        fileInput.value = '';
+      });
+      ['dragenter', 'dragover'].forEach(function (evt) {
+        dropzone.addEventListener(evt, function (e) {
+          e.preventDefault();
+          dropzone.classList.add('dragover');
+        });
+      });
+      ['dragleave', 'drop'].forEach(function (evt) {
+        dropzone.addEventListener(evt, function (e) {
+          e.preventDefault();
+          dropzone.classList.remove('dragover');
+        });
+      });
+      dropzone.addEventListener('drop', function (e) {
+        handleFiles(e.dataTransfer.files);
+      });
+      document.getElementById('link-input').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addLink();
+        }
+      });
+
+      function setStatus(msg, isError, loading) {
+        document.getElementById('status-text').textContent = msg || '';
+        document.getElementById('status').classList.toggle('error', !!isError);
+        document.getElementById('spinner').classList.toggle('visible', !!loading);
+      }
+
+      function resetFlow() {
+        currentRequest = '';
+        currentDocPath = '';
+        attachments = [];
+        renderAttachments();
+        document.getElementById('request').value = '';
+        document.getElementById('link-input').value = '';
+        document.getElementById('roles-box').style.display = 'none';
+        document.getElementById('plan-box').style.display = 'none';
+        document.getElementById('result-box').style.display = 'none';
+        setStatus('');
+      }
+
+      function requestPlan() {
+        currentRequest = document.getElementById('request').value.trim();
+        if (!currentRequest) {
+          setStatus('Enter a request first.', true, false);
+          return;
+        }
+        document.getElementById('roles-box').style.display = 'none';
+        document.getElementById('plan-box').style.display = 'none';
+        document.getElementById('result-box').style.display = 'none';
+
+        if (attachments.length > 0) {
+          reviewFiles();
+        } else {
+          draftPlan();
+        }
+      }
+
+      function reviewFiles() {
+        setStatus('Reviewing your attached files...', false, true);
+        document.getElementById('plan-btn').disabled = true;
+
+        callServer('classifyAttachments', [attachments], function (roles) {
+          applyRoles(roles);
+          renderRolesList();
+          document.getElementById('roles-box').style.display = 'block';
+          setStatus('', false, false);
+          document.getElementById('plan-btn').disabled = false;
+        }, function (err) {
+          setStatus('Error reviewing files: ' + err.message, true, false);
+          document.getElementById('plan-btn').disabled = false;
+        });
+      }
+
+      function cancelRoleReview() {
+        document.getElementById('roles-box').style.display = 'none';
+        setStatus('');
+      }
+
+      function confirmRolesAndDraftPlan() {
+        document.getElementById('roles-box').style.display = 'none';
+        draftPlan();
+      }
+
+      function draftPlan() {
+        setStatus('Thinking through a plan...', false, true);
+        document.getElementById('plan-btn').disabled = true;
+
+        callServer('getPlan', [currentRequest, attachments], function (plan) {
+          document.getElementById('plan-text').textContent = plan;
+          document.getElementById('plan-box').style.display = 'block';
+          setStatus('', false, false);
+          document.getElementById('plan-btn').disabled = false;
+        }, function (err) {
+          setStatus('Error: ' + err.message, true, false);
+          document.getElementById('plan-btn').disabled = false;
+        });
+      }
+
+      function approve() {
+        setStatus('Generating your document...', false, true);
+        document.getElementById('approve-btn').disabled = true;
+
+        callServer('generateDoc', [currentRequest, attachments], function (filePath) {
+          currentDocPath = filePath;
+          document.getElementById('doc-path').textContent = filePath;
+          document.getElementById('result-box').style.display = 'block';
+          setStatus('', false, false);
+          document.getElementById('approve-btn').disabled = false;
+        }, function (err) {
+          setStatus('Error: ' + err.message, true, false);
+          document.getElementById('approve-btn').disabled = false;
+        });
+      }
+
+      function openInFinder() {
+        if (currentDocPath) {
+          window.desktop.openInFinder(currentDocPath);
+        }
+      }
+
+      function toggleSettings() {
+        var box = document.getElementById('settings-box');
+        var opening = box.style.display !== 'block';
+        box.style.display = opening ? 'block' : 'none';
+        if (opening) loadSettings();
+      }
+
+      function loadSettings() {
+        window.desktop.getSettings().then(function (settings) {
+          document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'claude';
+          document.getElementById('setting-api-key').value = settings.ANTHROPIC_API_KEY || '';
+          document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
+          document.getElementById('setting-orchestrator-model').value = settings.OLLAMA_ORCHESTRATOR_MODEL || '';
+          document.getElementById('setting-planner-model').value = settings.OLLAMA_PLANNER_MODEL || '';
+          document.getElementById('setting-code-engine-model').value = settings.OLLAMA_CODE_ENGINE_MODEL || '';
+        });
+      }
+
+      function saveSettings() {
+        var settings = {
+          LLM_PROVIDER: document.getElementById('setting-provider').value,
+          ANTHROPIC_API_KEY: document.getElementById('setting-api-key').value.trim(),
+          OLLAMA_URL: document.getElementById('setting-ollama-url').value.trim(),
+          OLLAMA_ORCHESTRATOR_MODEL: document.getElementById('setting-orchestrator-model').value.trim(),
+          OLLAMA_PLANNER_MODEL: document.getElementById('setting-planner-model').value.trim(),
+          OLLAMA_CODE_ENGINE_MODEL: document.getElementById('setting-code-engine-model').value.trim()
+        };
+        window.desktop.setSettings(settings).then(function () {
+          toggleSettings();
+          refreshProviderStatus();
+        });
+      }
+
+      function refreshProviderStatus() {
+        window.desktop.getSettings().then(function (settings) {
+          var provider = settings.LLM_PROVIDER || 'claude';
+          var el = document.getElementById('provider-status');
+          if (provider === 'ollama') {
+            el.textContent = 'Using local Ollama (' + (settings.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions') + ')';
+          } else {
+            el.textContent = settings.ANTHROPIC_API_KEY ? 'Using Claude API' : 'Using Claude API — no API key set yet, open Settings';
+          }
+        });
+      }
+
+      refreshProviderStatus();
+    </script>
+  </body>
+</html>

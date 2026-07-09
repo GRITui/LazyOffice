@@ -1,0 +1,16 @@
+{
+  "name": "lazyoffice-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LazyOffice desktop prototype — chat a request, review the plan, approve, get a local .docx file.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "docx": "^9.0.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
