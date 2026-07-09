@@ -20,13 +20,15 @@ const LLM_PROVIDER_DEFAULT = 'ollama';
 const OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
 const OLLAMA_MODEL_DEFAULT = 'llama3.1:8b';
 
-// The First Goal doc's 5-agent pipeline, same mapping as Code.gs.
+// The First Goal doc's 5-agent pipeline, same mapping as Code.gs. roleLabel is
+// the friendly pipeline-stage name (Settings groups tick boxes by it); label/
+// ollamaTag describe that role's own recommended model.
 const OLLAMA_ROLE_MODELS = {
-  orchestrator: { property: 'OLLAMA_ORCHESTRATOR_MODEL', label: 'Qwen3.5-9B', ollamaTag: 'qwen3.5:9b' },
-  planner: { property: 'OLLAMA_PLANNER_MODEL', label: 'DeepSeek-R1-Distill-Qwen-7B', ollamaTag: 'deepseek-r1:7b' },
-  syntax_enforcer: { property: 'OLLAMA_SYNTAX_MODEL', label: 'Phi-4-mini (3.8B)', ollamaTag: 'phi4-mini:3.8b' },
-  code_engine: { property: 'OLLAMA_CODE_ENGINE_MODEL', label: 'IBM Granite 4.1 8B', ollamaTag: 'granite4.1:8b' },
-  generalist: { property: 'OLLAMA_GENERALIST_MODEL', label: 'Llama 3.1 8B Instruct', ollamaTag: 'llama3.1:8b' }
+  orchestrator: { roleLabel: 'Orchestrator', label: 'Qwen3.5-9B', ollamaTag: 'qwen3.5:9b' },
+  planner: { roleLabel: 'Planner', label: 'DeepSeek-R1-Distill-Qwen-7B', ollamaTag: 'deepseek-r1:7b' },
+  syntax_enforcer: { roleLabel: 'Syntax Enforcer', label: 'Phi-4-mini (3.8B)', ollamaTag: 'phi4-mini:3.8b' },
+  code_engine: { roleLabel: 'Code Engine', label: 'IBM Granite 4.1 8B', ollamaTag: 'granite4.1:8b' },
+  generalist: { roleLabel: 'Generalist', label: 'Llama 3.1 8B Instruct', ollamaTag: 'llama3.1:8b' }
 };
 
 async function callLLM(systemPrompt, userPrompt, role) {
@@ -69,14 +71,19 @@ async function callClaude(systemPrompt, userPrompt) {
   return body.content[0].text;
 }
 
-async function callOllama(systemPrompt, userPrompt, role) {
-  const url = ScriptProperties.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
+// Settings stores OLLAMA_ROLE_MODEL_SELECTION as { role: [tag, tag, ...] } —
+// the tick boxes in the renderer, in the order they were ticked. An empty or
+// missing selection for a role falls back to that role's own recommended tag.
+function resolveOllamaCandidates(role) {
+  const selection = ScriptProperties.getProperty('OLLAMA_ROLE_MODEL_SELECTION');
+  const picked = selection && Array.isArray(selection[role]) ? selection[role].filter(Boolean) : [];
+  if (picked.length) return picked;
   const roleConfig = OLLAMA_ROLE_MODELS[role];
-  const model = (roleConfig && ScriptProperties.getProperty(roleConfig.property)) ||
-    (roleConfig && roleConfig.ollamaTag) ||
-    ScriptProperties.getProperty('OLLAMA_MODEL') ||
-    OLLAMA_MODEL_DEFAULT;
+  if (roleConfig) return [roleConfig.ollamaTag];
+  return [ScriptProperties.getProperty('OLLAMA_MODEL') || OLLAMA_MODEL_DEFAULT];
+}
 
+async function callOllamaModel(url, model, systemPrompt, userPrompt) {
   const payload = {
     model: model,
     max_tokens: 1024,
@@ -94,14 +101,31 @@ async function callOllama(systemPrompt, userPrompt, role) {
 
   const text = await response.text();
   if (response.status !== 200) {
-    throw new Error('Ollama error ' + response.status + ': ' + text);
+    throw new Error('Ollama error ' + response.status + ' for model "' + model + '": ' + text);
   }
 
   const body = JSON.parse(text);
   if (!body.choices || !body.choices[0] || !body.choices[0].message) {
-    throw new Error('Unexpected Ollama response shape: ' + text.slice(0, 300));
+    throw new Error('Unexpected Ollama response shape for model "' + model + '": ' + text.slice(0, 300));
   }
   return body.choices[0].message.content;
+}
+
+// Tries each ticked model for the role in order, falling through to the next
+// on failure (server unreachable, model not pulled yet, etc.) — the
+// multi-select fallback chain behind the Settings tick boxes.
+async function callOllama(systemPrompt, userPrompt, role) {
+  const url = ScriptProperties.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
+  const candidates = resolveOllamaCandidates(role);
+  let lastErr = null;
+  for (let i = 0; i < candidates.length; i++) {
+    try {
+      return await callOllamaModel(url, candidates[i], systemPrompt, userPrompt);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('No Ollama model configured for role "' + role + '".');
 }
 
 const MAX_INLINE_TEXT_CHARS = 4000;
@@ -212,16 +236,77 @@ const OUTPUT_TYPE_COPY = {
   presentation: 'a presentation: its title and the slides/bullet points it will contain'
 };
 
-async function getPlan(userRequest, attachments, outputType) {
+function extractJson(text) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch (err) {
+    return null;
+  }
+}
+
+// Circuit breaker on the clarification loop, mirroring the Squad Setup doc's
+// 3-strikes convention: after this many rounds the Orchestrator is told to
+// stop asking and just draft its best plan, so a request the model keeps
+// finding "unclear" can never trap the user in an endless Q&A loop.
+const MAX_CLARIFICATION_ROUNDS = 3;
+
+function buildClarificationContext(clarifications) {
+  if (!clarifications || !clarifications.length) return '';
+  const lines = clarifications.map((c, i) =>
+    'Q' + (i + 1) + ': ' + c.question + '\nA' + (i + 1) + ': ' + (c.answer || '(no answer given)'));
+  return '\n\nClarification so far:\n' + lines.join('\n');
+}
+
+/**
+ * Stage 1 of the HITL flow. Before drafting a plan, the Orchestrator first
+ * judges whether the request has enough detail to plan confidently for the
+ * chosen output type — if not, it asks a short list of clarifying questions
+ * instead of guessing. The renderer collects the user's answers and calls
+ * this again with the growing `clarifications` history; that repeats until
+ * the model returns a plan, or MAX_CLARIFICATION_ROUNDS is hit and it's told
+ * to stop asking and draft its best plan with reasonable assumptions.
+ * Resolves to { status: 'ready', plan } or
+ * { status: 'needs_clarification', questions: [...] }.
+ */
+async function getPlan(userRequest, attachments, outputType, clarifications) {
   const describe = OUTPUT_TYPE_COPY[outputType] || OUTPUT_TYPE_COPY.document;
-  const systemPrompt = 'You are a planning assistant for an office document generator. ' +
-    'Given a user\'s request and any reference material provided, respond with a short ' +
-    '(2-4 sentence) plain-language plan describing ' + describe + '. If a reference item is ' +
-    'tagged with a role, use "raw data" items as the source of facts/numbers to cite, mirror ' +
-    'the structure/sections of an "output template" item, and match the tone and format of a ' +
-    '"reference report/presentation" item. Plain sentences only — no code, XML, or markdown ' +
-    'formatting.';
-  return callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'orchestrator');
+  const forceReady = (clarifications || []).length >= MAX_CLARIFICATION_ROUNDS;
+  const systemPrompt = 'You are a planning assistant for an office document generator. Given a ' +
+    'user\'s request and any reference material, first judge whether you have enough detail to ' +
+    'confidently plan ' + describe + '. ' +
+    (forceReady
+      ? 'You have already asked enough clarifying questions for this request — draft your best ' +
+        'plan now using reasonable assumptions for anything still unclear. Do not ask further ' +
+        'questions.'
+      : 'If key details are genuinely missing (e.g. subject, scope, audience, data source, or ' +
+        'desired length) and you cannot make a reasonable assumption, ask 1-3 short, specific ' +
+        'clarifying questions instead of guessing. If the request is already clear enough, or a ' +
+        'reasonable assumption would do, draft the plan instead — do not ask questions just to ' +
+        'be thorough.') +
+    ' If a reference item is tagged with a role, use "raw data" items as the source of facts/' +
+    'numbers to cite, mirror the structure/sections of an "output template" item, and match the ' +
+    'tone and format of a "reference report/presentation" item. Respond ONLY with a JSON object, ' +
+    'either {"status": "ready", "plan": string} where plan is a short (2-4 sentence) plain-' +
+    'language description of what will be created, or {"status": "needs_clarification", ' +
+    '"questions": [string, ...]}. No markdown, no code fences, no commentary — just the JSON ' +
+    'object.';
+  const userPrompt = userRequest + buildAttachmentContext(attachments) + buildClarificationContext(clarifications);
+  const raw = await callLLM(systemPrompt, userPrompt, 'orchestrator');
+  const parsed = extractJson(raw);
+
+  if (parsed && parsed.status === 'needs_clarification' && Array.isArray(parsed.questions) &&
+      parsed.questions.length && !forceReady) {
+    return { status: 'needs_clarification', questions: parsed.questions.slice(0, 3).map(String) };
+  }
+  if (parsed && parsed.status === 'ready' && typeof parsed.plan === 'string' && parsed.plan.trim()) {
+    return { status: 'ready', plan: parsed.plan };
+  }
+  // Soft-degrade per the crash-proofing convention: if the model didn't
+  // return valid status/plan JSON, treat its raw text as the plan rather
+  // than blocking the user on a parsing failure.
+  return { status: 'ready', plan: raw };
 }
 
 module.exports = {

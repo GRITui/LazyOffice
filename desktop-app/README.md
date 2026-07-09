@@ -24,6 +24,31 @@ documents). Pick the output type in the UI; `docgen.js` writes a real `.docx` (`
 package), `.xlsx` (`xlsx`/SheetJS), or `.pptx` (`pptxgenjs`) accordingly — no
 `DocumentApp`/`SpreadsheetApp`/`SlidesApp` involved.
 
+## The flow, in detail
+
+The chat → plan → approve loop from the webapp is extended here with two extra checkpoints,
+both aimed at catching mistakes before a file gets written rather than after:
+
+1. **Describe.** Type a request (and optionally attach reference files/links).
+2. **Clarify (only if needed).** Before drafting a plan, the Orchestrator judges whether the
+   request has enough detail. If something material is missing (subject, scope, audience, data
+   source, length) and it can't make a reasonable assumption, it asks 1-3 short questions
+   instead of guessing — answer them and it re-checks, repeating until it has enough (capped at
+   3 rounds, after which it drafts its best plan with reasonable assumptions rather than looping
+   forever). Most clear requests skip this step entirely.
+3. **Review the plan.** A short plain-language description of what will be created. Approve, or
+   Start Over.
+4. **Preview.** Approving doesn't write a file yet — it drafts the actual content (document
+   sections, spreadsheet rows, or slides) and shows it in a preview card: the real text/table/
+   slide-by-slide breakdown, not a placeholder. Create File to write it for real, or Back to
+   return to the plan.
+5. **Done.** The file lands in `~/Documents/LazyOffice/`.
+
+`engine.getPlan` implements step 2 (returns `{status: 'ready', plan}` or
+`{status: 'needs_clarification', questions}`); `docgen.buildContent`/`docgen.createOutput` split
+step 4 into "draft content" and "write file" so the preview shows exactly what gets created,
+and Create File never re-runs the LLM (so it can't drift from what was previewed).
+
 ## Local-first by default
 
 Out of the box the app runs entirely on a **local Ollama server** — no API key, nothing sent
@@ -51,24 +76,30 @@ the `OLLAMA_URL` setting (default `http://127.0.0.1:11434`).
 ## What's here
 
 - `main.js` — Electron main process: creates the window, wires IPC handlers for
-  `getPlan`/`classifyAttachments`/`generateOutput`/settings/`openInFinder` and the first-run
-  `llmStatus`/`llmSetup` flow.
+  `getPlan`/`classifyAttachments`/`buildContent`/`createOutput`/`getRoleModels`/settings/
+  `openInFinder` and the first-run `llmStatus`/`llmSetup` flow.
 - `setup-llm.js` — first-run local-model detection + pulling (Ollama HTTP API).
 - `preload.js` — exposes a `window.desktop` bridge to the renderer (contextIsolation on,
   nodeIntegration off).
 - `engine.js` — ported LLM logic (`callLLM`/`callClaude`/`callOllama`, attachment role
-  classification, prompt building, output-type-aware plan drafting). No dead GAS-mock code —
-  a desktop app always has a real backend, so the mock/`isGasEnv` branching from
-  `Index.html` was dropped, not ported.
-- `docgen.js` — turns the generated JSON into a real file on disk: `generateDocument`,
-  `generateSpreadsheet`, `generatePresentation`, and a `generateOutput(request, attachments,
-  outputType)` dispatcher that picks between them.
+  classification, prompt building). `getPlan` is the proactive clarification loop described
+  above. `callOllama` resolves each role's ticked models (`OLLAMA_ROLE_MODEL_SELECTION`) and
+  tries them in order, falling through on failure — the fallback chain behind the Settings tick
+  boxes. No dead GAS-mock code — a desktop app always has a real backend, so the mock/
+  `isGasEnv` branching from `Index.html` was dropped, not ported.
+- `docgen.js` — turns the generated JSON into a real file on disk. `buildDocumentContent`/
+  `buildSpreadsheetContent`/`buildPresentationContent` (+ the `buildContent` dispatcher) draft
+  content only, for the preview step; `createDocument`/`createSpreadsheet`/`createPresentation`
+  (+ the `createOutput` dispatcher) write the already-previewed content to disk.
+  `generateDocument`/`generateSpreadsheet`/`generatePresentation` remain as one-shot build+create
+  helpers.
 - `config-store.js` — local JSON-file settings store, same shape as GAS's
   `PropertiesService.getScriptProperties()` so `engine.js` didn't need restructuring.
 - `renderer/index.html` — the UI, ported from `apps-script/Index.html` with the mock banner/
-  `google.script.run` detection removed, a Document/Spreadsheet/Presentation type selector
-  added, the result card showing a file path + "Show in Finder" instead of a Drive link, and
-  a new Settings panel (the desktop equivalent of Apps Script's Script Properties editor).
+  `google.script.run` detection removed, a Document/Spreadsheet/Presentation type selector, a
+  clarification card, a content-preview card, the result card showing a file path + "Show in
+  Finder" instead of a Drive link, and a Settings panel with per-role model tick boxes (the
+  desktop equivalent of Apps Script's Script Properties editor).
 
 ## Running it
 
@@ -78,25 +109,34 @@ npm install
 npm start
 ```
 
-On first launch, open **Settings** and either paste your Anthropic API key, or switch the
-provider to "Local Ollama" and set the URL/models (defaults match `ollama serve`'s standard
-port and the First Goal doc's model tags — see the root `README.md`'s Ollama table). Pick
-Document, Spreadsheet, or Presentation, describe what you want, review the plan, approve, and
-the file lands in `~/Documents/LazyOffice/`.
+On first launch the app is already set to "Local Ollama" (defaults match `ollama serve`'s
+standard port and the First Goal doc's model tags — see the root `README.md`'s Ollama table);
+open **Settings** to tick different models per pipeline role (tick more than one for a fallback
+chain) or switch the provider to "Claude API" and paste a key. Pick Document, Spreadsheet, or
+Presentation, describe what you want, answer any clarifying questions if asked, review the
+plan, approve to see a preview, then Create File — it lands in `~/Documents/LazyOffice/`.
 
 ## Status
 
 Runs in a real Electron window and is **packaged into a `.app`** (with a custom icon) via
-`electron-builder` (see Building below). The full flow has been **driven end-to-end through
-the real renderer** — for each of the three output types, a request → plan (Get Plan) →
-approve (Approve & Generate) → file-write cycle was exercised against a local stand-in LLM,
-and each resulting `.docx`/`.xlsx`/`.pptx` was opened and its content verified (real
-headings/rows/slides, and a native chart in the deck), not just its existence. On macOS (this
-app's target) the API key is encrypted at rest via the OS keychain (Electron `safeStorage`);
-a pre-existing plaintext key is migrated to encrypted on first launch. On a platform with no
-credential store available, it falls back to plaintext with a console warning rather than
-refusing to start — so the encrypted-at-rest guarantee holds on macOS/Windows but not
-necessarily on a bare Linux box.
+`electron-builder` (see Building below) — confirmed working on the Owner's machine. The base
+flow has been **driven end-to-end through the real renderer** — for each of the three output
+types, a request → plan (Get Plan) → approve → file-write cycle was exercised against a local
+stand-in LLM, and each resulting `.docx`/`.xlsx`/`.pptx` was opened and its content verified
+(real headings/rows/slides, and a native chart in the deck), not just its existence. On macOS
+(this app's target) the API key is encrypted at rest via the OS keychain (Electron
+`safeStorage`); a pre-existing plaintext key is migrated to encrypted on first launch. On a
+platform with no credential store available, it falls back to plaintext with a console warning
+rather than refusing to start — so the encrypted-at-rest guarantee holds on macOS/Windows but
+not necessarily on a bare Linux box.
+
+The clarification loop, content-preview step, and per-role model tick boxes (see "The flow, in
+detail" above) are the newest additions. They've been logic-tested the same way as the base
+flow — a stand-in Ollama server exercising the proactive clarify/re-plan round-trip, a
+first-model-fails/second-model-succeeds fallback chain, and the `buildContent`/`createOutput`
+split for all three output types (each written file inspected, not just checked for existence)
+— but **not yet driven through a real Electron window**, since this sandbox can't run one.
+Worth a real run before calling this batch done.
 
 Remaining before public distribution: code-signing + notarization (needs an Apple Developer
 ID — see below), and a formal QA pass.

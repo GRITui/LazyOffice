@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T17:24:35Z
+Last Updated: 2026-07-09T19:30:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -82,6 +82,27 @@ been built — both tracks so far were implemented directly to prove the end-to-
   14-assertion setup-llm unit test + 7-assertion first-run CDP test (against a fake Ollama),
   passing on BOTH the dev binary and the packaged `.app`.
 
+* `desktop-app/` Owner-requested flow upgrade (TSK-003, not yet committed), scoped after the
+  Owner confirmed the app runs for real on their machine: (1) proactive clarification loop —
+  `engine.getPlan` now returns `{status:'ready', plan}` or `{status:'needs_clarification',
+  questions}`; the Orchestrator only asks (max 3 rounds, then drafts anyway) when a request is
+  genuinely under-specified, and the renderer's new clarify-box collects answers and re-calls
+  `getPlan` with the growing Q&A history. (2) Local-model tick boxes per pipeline role,
+  replacing the free-text model fields — Settings now renders all 5 pipeline models as tick
+  boxes under each of the 5 roles (`window.desktop.getRoleModels()`, sourced from `engine.js`'s
+  `OLLAMA_ROLE_MODELS` so the UI can't drift from the backend); ticking more than one sets a
+  fallback chain, and `callOllama` now tries each ticked model in order via the new
+  `resolveOllamaCandidates`, falling through on failure. Settings storage changed from 5
+  separate `OLLAMA_*_MODEL` keys to one `OLLAMA_ROLE_MODEL_SELECTION` object. (3) Content
+  preview before file creation — `docgen.js` split into `buildDocumentContent`/
+  `buildSpreadsheetContent`/`buildPresentationContent` (+ `buildContent` dispatcher, draft
+  only, no disk write) and `createDocument`/`createSpreadsheet`/`createPresentation` (+
+  `createOutput` dispatcher, writes exactly what was previewed). Approving a plan now shows a
+  new preview card — rendered document text, a real `<table>` for spreadsheets, or a slide-by-
+  slide breakdown for presentations — with Create File / Back, instead of writing immediately.
+  (Local-first default and full per-role Settings fields, requested in the same batch, had
+  already landed in the two commits above this one.)
+
 ## Blockers & QA Failures
 
 * RESOLVED (2026-07-09): TSK-003 now runs in a real Electron window. `npm start` and the
@@ -102,6 +123,11 @@ been built — both tracks so far were implemented directly to prove the end-to-
   owner-provided Apple Developer ID cert (steps documented in `desktop-app/README.md`).
 * QA status: the desktop track (TSK-003) has had a code-review pass (fixes verified). The GAS
   webapp track (TSK-001) has not had a dedicated QA pass yet.
+* The clarify-loop/preview/tick-box batch above is logic-tested only (stand-in Ollama server:
+  the proactive clarify → answer → re-plan round-trip, a first-model-fails/second-succeeds
+  fallback chain, and `buildContent`/`createOutput` for all 3 output types with each written
+  file inspected) — not yet driven through a real Electron window. Needs the same kind of CDP
+  pass the base flow got before this is called done.
 
 ## Cross-Squad Requests
 

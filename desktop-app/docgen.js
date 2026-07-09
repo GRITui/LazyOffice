@@ -189,13 +189,12 @@ async function writePptx(parsed) {
 }
 
 /**
- * Stage 2 of the HITL flow, run only after owner approval: draft document
- * content and write the .docx file. Same prompt/parsing logic as Code.gs's
- * generateDoc — only the "create the file" step differs (local .docx here
- * instead of DocumentApp.create in Drive). Returns { filePath, summary } —
- * see summarizeResult for the Generalist's role in the summary.
+ * Stage 2a of the HITL flow, run after plan approval: draft the actual
+ * content but don't touch disk yet — the renderer shows it in a preview card
+ * (see createDocument for the write step the preview's "Create File" button
+ * triggers). Same prompt/parsing logic as Code.gs's generateDoc.
  */
-async function generateDocument(userRequest, attachments) {
+async function buildDocumentContent(userRequest, attachments) {
   const systemPrompt = 'You are a document content generator. Given a user\'s request and any ' +
     'reference material (cite facts from "raw data" items, mirror the structure of an ' +
     '"output template" item, match the tone/format of a "reference report/presentation" ' +
@@ -203,12 +202,10 @@ async function generateDocument(userRequest, attachments) {
     '{"title": string, "sections": [{"heading": string, "body": string}]}. ' +
     'No markdown, no code fences, no commentary — just the JSON object.';
   const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
-  const parsed = await parseDocumentJson(raw);
-  const filePath = await writeDocx(parsed);
-  return { filePath: filePath, summary: await summarizeResult('document', parsed, filePath) };
+  return parseDocumentJson(raw);
 }
 
-async function generateSpreadsheet(userRequest, attachments) {
+async function buildSpreadsheetContent(userRequest, attachments) {
   const systemPrompt = 'You are a spreadsheet content generator. Given a user\'s request and any ' +
     'reference material (pull real numbers from "raw data" items, mirror the columns of an ' +
     '"output template" item), respond ONLY with a JSON object of the form ' +
@@ -216,12 +213,10 @@ async function generateSpreadsheet(userRequest, attachments) {
     '"rows": [[string|number, ...], ...]} where every row array has the same length as ' +
     'headers. No markdown, no code fences, no commentary — just the JSON object.';
   const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
-  const parsed = await parseSpreadsheetJson(raw);
-  const filePath = writeXlsx(parsed);
-  return { filePath: filePath, summary: await summarizeResult('spreadsheet', parsed, filePath) };
+  return parseSpreadsheetJson(raw);
 }
 
-async function generatePresentation(userRequest, attachments) {
+async function buildPresentationContent(userRequest, attachments) {
   const systemPrompt = 'You are a presentation content generator. Given a user\'s request and any ' +
     'reference material (cite facts from "raw data" items, mirror the structure of an ' +
     '"output template" item, match the tone of a "reference report/presentation" item), ' +
@@ -232,29 +227,76 @@ async function generatePresentation(userRequest, attachments) {
     'at most one chart slide, only when the data genuinely supports one. No markdown, no code ' +
     'fences, no commentary — just the JSON object.';
   const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
-  const parsed = await parseSlidesJson(raw);
+  return parseSlidesJson(raw);
+}
+
+// Stage 2b: write the already-previewed content to disk. Split out from the
+// build* functions above so the preview step can show `parsed` to the user
+// without generating a file, and a "Create File" click can write exactly
+// what was previewed (not re-run the LLM, which could drift from what the
+// user approved).
+async function createDocument(parsed) {
+  const filePath = await writeDocx(parsed);
+  return { filePath: filePath, summary: await summarizeResult('document', parsed, filePath) };
+}
+
+async function createSpreadsheet(parsed) {
+  const filePath = writeXlsx(parsed);
+  return { filePath: filePath, summary: await summarizeResult('spreadsheet', parsed, filePath) };
+}
+
+async function createPresentation(parsed) {
   const filePath = await writePptx(parsed);
   return { filePath: filePath, summary: await summarizeResult('presentation', parsed, filePath) };
 }
 
-const GENERATORS = {
-  document: generateDocument,
-  spreadsheet: generateSpreadsheet,
-  presentation: generatePresentation
+async function generateDocument(userRequest, attachments) {
+  return createDocument(await buildDocumentContent(userRequest, attachments));
+}
+
+async function generateSpreadsheet(userRequest, attachments) {
+  return createSpreadsheet(await buildSpreadsheetContent(userRequest, attachments));
+}
+
+async function generatePresentation(userRequest, attachments) {
+  return createPresentation(await buildPresentationContent(userRequest, attachments));
+}
+
+const CONTENT_BUILDERS = {
+  document: buildDocumentContent,
+  spreadsheet: buildSpreadsheetContent,
+  presentation: buildPresentationContent
+};
+
+const CONTENT_CREATORS = {
+  document: createDocument,
+  spreadsheet: createSpreadsheet,
+  presentation: createPresentation
 };
 
 /**
- * Single entry point the IPC layer calls. outputType is one of
- * 'document'|'spreadsheet'|'presentation' (defaults to 'document'). Resolves
+ * Stage 2a entry point the IPC layer calls after plan approval. outputType is
+ * one of 'document'|'spreadsheet'|'presentation' (defaults to 'document').
+ * Resolves to { outputType, parsed } for the renderer's preview card.
+ */
+async function buildContent(userRequest, attachments, outputType) {
+  const type = CONTENT_BUILDERS[outputType] ? outputType : 'document';
+  const parsed = await CONTENT_BUILDERS[type](userRequest, attachments);
+  return { outputType: type, parsed: parsed };
+}
+
+/**
+ * Stage 2b entry point, called once the user confirms the preview. Resolves
  * to { filePath, summary }.
  */
-function generateOutput(userRequest, attachments, outputType) {
-  const generator = GENERATORS[outputType] || GENERATORS.document;
-  return generator(userRequest, attachments);
+function createOutput(outputType, parsed) {
+  const creator = CONTENT_CREATORS[outputType] || CONTENT_CREATORS.document;
+  return creator(parsed);
 }
 
 module.exports = {
-  generateOutput,
+  buildContent,
+  createOutput,
   generateDocument,
   generateSpreadsheet,
   generatePresentation,

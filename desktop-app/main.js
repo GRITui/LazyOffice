@@ -22,9 +22,11 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
-ipcMain.handle('lazyoffice:getPlan', (event, userRequest, attachments, outputType) => engine.getPlan(userRequest, attachments, outputType));
+ipcMain.handle('lazyoffice:getPlan', (event, userRequest, attachments, outputType, clarifications) => engine.getPlan(userRequest, attachments, outputType, clarifications));
 ipcMain.handle('lazyoffice:classifyAttachments', (event, attachments) => engine.classifyAttachments(attachments));
-ipcMain.handle('lazyoffice:generateOutput', (event, userRequest, attachments, outputType) => docgen.generateOutput(userRequest, attachments, outputType));
+ipcMain.handle('lazyoffice:buildContent', (event, userRequest, attachments, outputType) => docgen.buildContent(userRequest, attachments, outputType));
+ipcMain.handle('lazyoffice:createOutput', (event, outputType, parsed) => docgen.createOutput(outputType, parsed));
+ipcMain.handle('lazyoffice:getRoleModels', () => engine.OLLAMA_ROLE_MODELS);
 ipcMain.handle('lazyoffice:openInFinder', (event, filePath) => shell.showItemInFolder(filePath));
 
 // --- First-run local-LLM setup ---
@@ -61,11 +63,7 @@ const SETTINGS_KEYS = [
   'LLM_PROVIDER',
   'ANTHROPIC_API_KEY',
   'OLLAMA_URL',
-  'OLLAMA_ORCHESTRATOR_MODEL',
-  'OLLAMA_PLANNER_MODEL',
-  'OLLAMA_SYNTAX_MODEL',
-  'OLLAMA_CODE_ENGINE_MODEL',
-  'OLLAMA_GENERALIST_MODEL'
+  'OLLAMA_ROLE_MODEL_SELECTION'
 ];
 
 const SECRET_KEYS = ['ANTHROPIC_API_KEY'];

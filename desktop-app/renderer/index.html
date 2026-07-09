@@ -249,6 +249,29 @@
         border-radius: var(--radius);
       }
       .settings-hint { font-size: 12px; color: var(--text-muted); margin: 2px 0 0; }
+      .role-model-role { margin-top: 14px; border: none; padding: 0; }
+      .role-model-role legend {
+        font-size: 12px; font-weight: 700; color: var(--text); padding: 0; margin-bottom: 4px;
+      }
+      .role-model-options { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+      .role-model-options label {
+        display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 400;
+        color: var(--text); margin: 0; text-transform: none; letter-spacing: normal;
+      }
+      .role-model-options input[type="checkbox"] { width: auto; margin: 0; }
+      #clarify-box .settings-field label { text-transform: none; font-weight: 600; font-size: 12.5px; }
+      #preview-box { max-height: 420px; overflow-y: auto; }
+      #preview-body h3 { font-size: 14px; margin: 12px 0 4px; }
+      #preview-body h3:first-child { margin-top: 0; }
+      #preview-body p { margin: 0 0 8px; line-height: 1.5; font-size: 13px; white-space: pre-wrap; }
+      #preview-table-wrap { overflow-x: auto; }
+      #preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      #preview-table th, #preview-table td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+      #preview-table th { background: var(--bg); font-weight: 700; }
+      .preview-slide { padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+      .preview-slide h4 { margin: 0 0 6px; font-size: 13px; }
+      .preview-slide ul { margin: 0; padding-left: 18px; font-size: 12.5px; }
+      .preview-slide .chart-note { font-size: 12px; color: var(--text-muted); font-style: italic; }
       .type-select {
         display: inline-flex;
         border: 1px solid var(--border);
@@ -323,27 +346,10 @@
         <label for="setting-ollama-url">Ollama URL</label>
         <input type="text" id="setting-ollama-url" placeholder="http://localhost:11434/v1/chat/completions">
       </div>
-      <div class="settings-field">
-        <label for="setting-orchestrator-model">Orchestrator model (Ollama)</label>
-        <input type="text" id="setting-orchestrator-model" placeholder="qwen3.5:9b">
-      </div>
-      <div class="settings-field">
-        <label for="setting-planner-model">Planner model (Ollama)</label>
-        <input type="text" id="setting-planner-model" placeholder="deepseek-r1:7b">
-      </div>
-      <div class="settings-field">
-        <label for="setting-syntax-model">Syntax Enforcer model (Ollama)</label>
-        <input type="text" id="setting-syntax-model" placeholder="phi4-mini:3.8b">
-      </div>
-      <div class="settings-field">
-        <label for="setting-code-engine-model">Code Engine model (Ollama)</label>
-        <input type="text" id="setting-code-engine-model" placeholder="granite4.1:8b">
-      </div>
-      <div class="settings-field">
-        <label for="setting-generalist-model">Generalist model (Ollama)</label>
-        <input type="text" id="setting-generalist-model" placeholder="llama3.1:8b">
-      </div>
-      <p class="settings-hint">Ollama fields are only used when the provider above is "Local Ollama". Leave a model field blank to use its default tag.</p>
+      <p class="field-label" style="margin-top:16px;">Local models per role</p>
+      <p class="settings-hint">Tick a model for each pipeline role. Tick more than one to set a fallback chain — if the first fails (e.g. not pulled yet), the next ticked model is tried.</p>
+      <div id="role-model-grid"></div>
+      <p class="settings-hint">Only used when the provider above is "Local Ollama".</p>
       <div class="actions">
         <button id="save-settings-btn" onclick="saveSettings()">Save</button>
         <button class="secondary" onclick="toggleSettings()">Close</button>
@@ -383,12 +389,31 @@
       </div>
     </div>
 
+    <div id="clarify-box" class="card">
+      <p class="card-label">A few quick questions</p>
+      <p class="roles-hint">Your request could use a bit more detail before I draft a plan.</p>
+      <div id="clarify-questions"></div>
+      <div class="actions">
+        <button id="clarify-submit-btn" onclick="submitClarifications()">Submit &amp; Continue</button>
+        <button class="secondary" onclick="resetFlow()">Start Over</button>
+      </div>
+    </div>
+
     <div id="plan-box" class="card">
       <p class="card-label">Proposed plan</p>
       <p id="plan-text"></p>
       <div class="actions">
-        <button id="approve-btn" onclick="approve()">Approve &amp; Generate</button>
+        <button id="approve-btn" onclick="approve()">Approve &amp; Preview</button>
         <button class="secondary" onclick="resetFlow()">Start Over</button>
+      </div>
+    </div>
+
+    <div id="preview-box" class="card">
+      <p class="card-label" id="preview-label">Preview</p>
+      <div id="preview-body"></div>
+      <div class="actions">
+        <button id="create-btn" onclick="createFromPreview()">Create File</button>
+        <button class="secondary" onclick="backToPlan()">Back</button>
       </div>
     </div>
 
@@ -413,6 +438,9 @@
       var outputType = 'document';
       var attachments = []; // { id, type: 'file'|'link', name, mimeType, size, base64, url }
       var MAX_FILE_BYTES = 4 * 1024 * 1024;
+      var clarificationHistory = []; // [{question, answer}, ...] across all rounds so far
+      var currentParsed = null; // content returned by buildContent, shown in the preview card
+      var roleModelsCache = null; // { role: {roleLabel, label, ollamaTag} }, fetched once
 
       var OUTPUT_TYPES = {
         document: { label: 'Document', noun: 'document', extension: '.docx', placeholder: 'e.g. Generate a one-page project status update for the LazyOffice MVP' },
@@ -610,12 +638,16 @@
       function resetFlow() {
         currentRequest = '';
         currentDocPath = '';
+        clarificationHistory = [];
+        currentParsed = null;
         attachments = [];
         renderAttachments();
         document.getElementById('request').value = '';
         document.getElementById('link-input').value = '';
         document.getElementById('roles-box').style.display = 'none';
+        document.getElementById('clarify-box').style.display = 'none';
         document.getElementById('plan-box').style.display = 'none';
+        document.getElementById('preview-box').style.display = 'none';
         document.getElementById('result-box').style.display = 'none';
         setStatus('');
       }
@@ -626,8 +658,11 @@
           setStatus('Enter a request first.', true, false);
           return;
         }
+        clarificationHistory = [];
         document.getElementById('roles-box').style.display = 'none';
+        document.getElementById('clarify-box').style.display = 'none';
         document.getElementById('plan-box').style.display = 'none';
+        document.getElementById('preview-box').style.display = 'none';
         document.getElementById('result-box').style.display = 'none';
 
         if (attachments.length > 0) {
@@ -664,36 +699,170 @@
       }
 
       function draftPlan() {
+        document.getElementById('clarify-box').style.display = 'none';
+        document.getElementById('plan-box').style.display = 'none';
         setStatus('Thinking through a plan...', false, true);
         document.getElementById('plan-btn').disabled = true;
 
-        callServer('getPlan', [currentRequest, attachments, outputType], function (plan) {
-          document.getElementById('plan-text').textContent = plan;
-          document.getElementById('plan-box').style.display = 'block';
+        callServer('getPlan', [currentRequest, attachments, outputType, clarificationHistory], function (result) {
           setStatus('', false, false);
           document.getElementById('plan-btn').disabled = false;
+          if (result && result.status === 'needs_clarification' && result.questions && result.questions.length) {
+            renderClarifyQuestions(result.questions);
+            document.getElementById('clarify-box').style.display = 'block';
+            return;
+          }
+          var planText = (result && result.plan) || (typeof result === 'string' ? result : '');
+          document.getElementById('plan-text').textContent = planText;
+          document.getElementById('plan-box').style.display = 'block';
         }, function (err) {
           setStatus('Error: ' + err.message, true, false);
           document.getElementById('plan-btn').disabled = false;
         });
       }
 
+      function renderClarifyQuestions(questions) {
+        var container = document.getElementById('clarify-questions');
+        container.innerHTML = '';
+        questions.forEach(function (q, i) {
+          var wrap = document.createElement('div');
+          wrap.className = 'settings-field';
+          var label = document.createElement('label');
+          label.textContent = q;
+          label.setAttribute('for', 'clarify-answer-' + i);
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.id = 'clarify-answer-' + i;
+          input.setAttribute('data-question', q);
+          wrap.appendChild(label);
+          wrap.appendChild(input);
+          container.appendChild(wrap);
+        });
+      }
+
+      function submitClarifications() {
+        var inputs = document.getElementById('clarify-questions').querySelectorAll('input');
+        Array.prototype.forEach.call(inputs, function (input) {
+          clarificationHistory.push({ question: input.getAttribute('data-question'), answer: input.value.trim() });
+        });
+        document.getElementById('clarify-box').style.display = 'none';
+        draftPlan();
+      }
+
       function approve() {
-        var noun = OUTPUT_TYPES[outputType].noun;
-        setStatus('Generating your ' + noun + '...', false, true);
+        setStatus('Drafting content to preview...', false, true);
         document.getElementById('approve-btn').disabled = true;
 
-        callServer('generateOutput', [currentRequest, attachments, outputType], function (result) {
-          currentDocPath = result.filePath;
-          document.getElementById('result-summary').textContent = result.summary;
-          document.getElementById('doc-path').textContent = result.filePath;
-          document.getElementById('result-label').textContent = OUTPUT_TYPES[outputType].label + ' ready';
-          document.getElementById('result-box').style.display = 'block';
+        callServer('buildContent', [currentRequest, attachments, outputType], function (result) {
+          currentParsed = result.parsed;
+          renderPreview(result.outputType, result.parsed);
+          document.getElementById('plan-box').style.display = 'none';
+          document.getElementById('preview-box').style.display = 'block';
           setStatus('', false, false);
           document.getElementById('approve-btn').disabled = false;
         }, function (err) {
           setStatus('Error: ' + err.message, true, false);
           document.getElementById('approve-btn').disabled = false;
+        });
+      }
+
+      function backToPlan() {
+        document.getElementById('preview-box').style.display = 'none';
+        document.getElementById('plan-box').style.display = 'block';
+      }
+
+      function renderPreview(type, parsed) {
+        document.getElementById('preview-label').textContent = OUTPUT_TYPES[type].label + ' preview';
+        var body = document.getElementById('preview-body');
+        body.innerHTML = '';
+
+        var title = document.createElement('h3');
+        title.textContent = parsed.title || 'Untitled';
+        body.appendChild(title);
+
+        if (type === 'document') {
+          (parsed.sections || []).forEach(function (section) {
+            if (section.heading) {
+              var h = document.createElement('h3');
+              h.textContent = section.heading;
+              body.appendChild(h);
+            }
+            if (section.body) {
+              var p = document.createElement('p');
+              p.textContent = section.body;
+              body.appendChild(p);
+            }
+          });
+        } else if (type === 'spreadsheet') {
+          var wrap = document.createElement('div');
+          wrap.id = 'preview-table-wrap';
+          var table = document.createElement('table');
+          table.id = 'preview-table';
+          var thead = document.createElement('thead');
+          var headRow = document.createElement('tr');
+          (parsed.headers || []).forEach(function (h) {
+            var th = document.createElement('th');
+            th.textContent = h;
+            headRow.appendChild(th);
+          });
+          thead.appendChild(headRow);
+          table.appendChild(thead);
+          var tbody = document.createElement('tbody');
+          (parsed.rows || []).forEach(function (row) {
+            var tr = document.createElement('tr');
+            row.forEach(function (cell) {
+              var td = document.createElement('td');
+              td.textContent = cell;
+              tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+          });
+          table.appendChild(tbody);
+          wrap.appendChild(table);
+          body.appendChild(wrap);
+        } else if (type === 'presentation') {
+          (parsed.slides || []).forEach(function (slide, i) {
+            var card = document.createElement('div');
+            card.className = 'preview-slide';
+            var h4 = document.createElement('h4');
+            h4.textContent = 'Slide ' + (i + 2) + (slide.heading ? ': ' + slide.heading : '');
+            card.appendChild(h4);
+            if (slide.chart && slide.chart.categories && slide.chart.values) {
+              var note = document.createElement('p');
+              note.className = 'chart-note';
+              note.textContent = 'Chart — ' + slide.chart.categories.join(', ');
+              card.appendChild(note);
+            } else if (slide.bullets && slide.bullets.length) {
+              var ul = document.createElement('ul');
+              slide.bullets.forEach(function (b) {
+                var li = document.createElement('li');
+                li.textContent = b;
+                ul.appendChild(li);
+              });
+              card.appendChild(ul);
+            }
+            body.appendChild(card);
+          });
+        }
+      }
+
+      function createFromPreview() {
+        var noun = OUTPUT_TYPES[outputType].noun;
+        setStatus('Creating your ' + noun + '...', false, true);
+        document.getElementById('create-btn').disabled = true;
+
+        callServer('createOutput', [outputType, currentParsed], function (result) {
+          currentDocPath = result.filePath;
+          document.getElementById('result-summary').textContent = result.summary;
+          document.getElementById('doc-path').textContent = result.filePath;
+          document.getElementById('result-label').textContent = OUTPUT_TYPES[outputType].label + ' ready';
+          document.getElementById('preview-box').style.display = 'none';
+          document.getElementById('result-box').style.display = 'block';
+          setStatus('', false, false);
+          document.getElementById('create-btn').disabled = false;
+        }, function (err) {
+          setStatus('Error: ' + err.message, true, false);
+          document.getElementById('create-btn').disabled = false;
         });
       }
 
@@ -710,39 +879,83 @@
         if (opening) loadSettings();
       }
 
-      function loadSettings() {
-        window.desktop.getSettings().then(function (settings) {
-          document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'ollama';
-          // The stored API key is never sent back to the UI. Leave the field blank
-          // and reflect its state via the placeholder; typing a new value replaces
-          // it, leaving it blank keeps the existing one (see saveSettings).
-          var apiKeyField = document.getElementById('setting-api-key');
-          apiKeyField.value = '';
-          if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
-            apiKeyField.placeholder = 'Stored key could not be read on this machine — re-enter it';
-          } else if (settings.ANTHROPIC_API_KEY_SET) {
-            apiKeyField.placeholder = '•••••••• stored — leave blank to keep, or type to replace';
-          } else {
-            apiKeyField.placeholder = 'sk-ant-...';
-          }
-          document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
-          document.getElementById('setting-orchestrator-model').value = settings.OLLAMA_ORCHESTRATOR_MODEL || '';
-          document.getElementById('setting-planner-model').value = settings.OLLAMA_PLANNER_MODEL || '';
-          document.getElementById('setting-syntax-model').value = settings.OLLAMA_SYNTAX_MODEL || '';
-          document.getElementById('setting-code-engine-model').value = settings.OLLAMA_CODE_ENGINE_MODEL || '';
-          document.getElementById('setting-generalist-model').value = settings.OLLAMA_GENERALIST_MODEL || '';
+      // Every role offers every model in the pipeline as a tick box — any model
+      // can serve any role, and ticking several sets a fallback chain (see
+      // engine.js's resolveOllamaCandidates). roleModels comes from the main
+      // process (source of truth: engine.js's OLLAMA_ROLE_MODELS) so this list
+      // and the defaults never drift out of sync with the backend.
+      function renderRoleModelGrid(roleModels, selection) {
+        var modelOptions = Object.keys(roleModels).map(function (r) {
+          return { tag: roleModels[r].ollamaTag, label: roleModels[r].label };
         });
+        var grid = document.getElementById('role-model-grid');
+        grid.innerHTML = '';
+        Object.keys(roleModels).forEach(function (role) {
+          var fieldset = document.createElement('fieldset');
+          fieldset.className = 'role-model-role';
+          var legend = document.createElement('legend');
+          legend.textContent = roleModels[role].roleLabel + ' (default: ' + roleModels[role].label + ')';
+          fieldset.appendChild(legend);
+          var optionsWrap = document.createElement('div');
+          optionsWrap.className = 'role-model-options';
+          var ticked = (selection && Array.isArray(selection[role]) && selection[role].length)
+            ? selection[role]
+            : [roleModels[role].ollamaTag];
+          modelOptions.forEach(function (opt) {
+            var label = document.createElement('label');
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.setAttribute('data-role', role);
+            input.setAttribute('data-tag', opt.tag);
+            input.checked = ticked.indexOf(opt.tag) !== -1;
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(opt.label));
+            optionsWrap.appendChild(label);
+          });
+          fieldset.appendChild(optionsWrap);
+          grid.appendChild(fieldset);
+        });
+      }
+
+      function readRoleModelSelection() {
+        var selection = {};
+        var boxes = document.getElementById('role-model-grid').querySelectorAll('input[type="checkbox"]');
+        Array.prototype.forEach.call(boxes, function (box) {
+          if (!box.checked) return;
+          var role = box.getAttribute('data-role');
+          (selection[role] = selection[role] || []).push(box.getAttribute('data-tag'));
+        });
+        return selection;
+      }
+
+      function loadSettings() {
+        Promise.all([window.desktop.getSettings(), roleModelsCache ? Promise.resolve(roleModelsCache) : window.desktop.getRoleModels()])
+          .then(function (results) {
+            var settings = results[0];
+            roleModelsCache = results[1];
+            document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'ollama';
+            // The stored API key is never sent back to the UI. Leave the field blank
+            // and reflect its state via the placeholder; typing a new value replaces
+            // it, leaving it blank keeps the existing one (see saveSettings).
+            var apiKeyField = document.getElementById('setting-api-key');
+            apiKeyField.value = '';
+            if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
+              apiKeyField.placeholder = 'Stored key could not be read on this machine — re-enter it';
+            } else if (settings.ANTHROPIC_API_KEY_SET) {
+              apiKeyField.placeholder = '•••••••• stored — leave blank to keep, or type to replace';
+            } else {
+              apiKeyField.placeholder = 'sk-ant-...';
+            }
+            document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
+            renderRoleModelGrid(roleModelsCache, settings.OLLAMA_ROLE_MODEL_SELECTION || {});
+          });
       }
 
       function saveSettings() {
         var settings = {
           LLM_PROVIDER: document.getElementById('setting-provider').value,
           OLLAMA_URL: document.getElementById('setting-ollama-url').value.trim(),
-          OLLAMA_ORCHESTRATOR_MODEL: document.getElementById('setting-orchestrator-model').value.trim(),
-          OLLAMA_PLANNER_MODEL: document.getElementById('setting-planner-model').value.trim(),
-          OLLAMA_SYNTAX_MODEL: document.getElementById('setting-syntax-model').value.trim(),
-          OLLAMA_CODE_ENGINE_MODEL: document.getElementById('setting-code-engine-model').value.trim(),
-          OLLAMA_GENERALIST_MODEL: document.getElementById('setting-generalist-model').value.trim()
+          OLLAMA_ROLE_MODEL_SELECTION: readRoleModelSelection()
         };
         // Only overwrite the stored API key when the user actually typed a new one;
         // a blank field means "keep the existing key" and is omitted entirely so it
