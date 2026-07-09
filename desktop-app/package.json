@@ -5,7 +5,31 @@
   "description": "LazyOffice desktop prototype — chat a request, review the plan, approve, get a local document, spreadsheet, or presentation file.",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.lazyoffice.desktop",
+    "productName": "LazyOffice",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "engine.js",
+      "docgen.js",
+      "config-store.js",
+      "renderer/**"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
   },
   "dependencies": {
     "docx": "^9.0.0",
@@ -13,6 +37,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
   }
 }

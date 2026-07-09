@@ -308,8 +308,16 @@
         <input type="text" id="setting-planner-model" placeholder="deepseek-r1:7b">
       </div>
       <div class="settings-field">
+        <label for="setting-syntax-model">Syntax Enforcer model (Ollama)</label>
+        <input type="text" id="setting-syntax-model" placeholder="phi4-mini:3.8b">
+      </div>
+      <div class="settings-field">
         <label for="setting-code-engine-model">Code Engine model (Ollama)</label>
         <input type="text" id="setting-code-engine-model" placeholder="granite4.1:8b">
+      </div>
+      <div class="settings-field">
+        <label for="setting-generalist-model">Generalist model (Ollama)</label>
+        <input type="text" id="setting-generalist-model" placeholder="llama3.1:8b">
       </div>
       <p class="settings-hint">Ollama fields are only used when the provider above is "Local Ollama". Leave a model field blank to use its default tag.</p>
       <div class="actions">
@@ -685,7 +693,9 @@
           document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
           document.getElementById('setting-orchestrator-model').value = settings.OLLAMA_ORCHESTRATOR_MODEL || '';
           document.getElementById('setting-planner-model').value = settings.OLLAMA_PLANNER_MODEL || '';
+          document.getElementById('setting-syntax-model').value = settings.OLLAMA_SYNTAX_MODEL || '';
           document.getElementById('setting-code-engine-model').value = settings.OLLAMA_CODE_ENGINE_MODEL || '';
+          document.getElementById('setting-generalist-model').value = settings.OLLAMA_GENERALIST_MODEL || '';
         });
       }
 
@@ -696,7 +706,9 @@
           OLLAMA_URL: document.getElementById('setting-ollama-url').value.trim(),
           OLLAMA_ORCHESTRATOR_MODEL: document.getElementById('setting-orchestrator-model').value.trim(),
           OLLAMA_PLANNER_MODEL: document.getElementById('setting-planner-model').value.trim(),
-          OLLAMA_CODE_ENGINE_MODEL: document.getElementById('setting-code-engine-model').value.trim()
+          OLLAMA_SYNTAX_MODEL: document.getElementById('setting-syntax-model').value.trim(),
+          OLLAMA_CODE_ENGINE_MODEL: document.getElementById('setting-code-engine-model').value.trim(),
+          OLLAMA_GENERALIST_MODEL: document.getElementById('setting-generalist-model').value.trim()
         };
         window.desktop.setSettings(settings).then(function () {
           toggleSettings();

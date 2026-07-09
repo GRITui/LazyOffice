@@ -63,15 +63,48 @@ the file lands in `~/Documents/LazyOffice/`.
 Scaffolded and logic-tested (the Claude and Ollama code paths, and real `.docx`/`.xlsx`/
 `.pptx` generation for all three output types, were verified against local stand-in
 servers — see commit history for details; each generated file was unzipped and its actual
-content checked, not just its existence). **Not yet run inside an actual Electron window** —
-installing the `electron` binary needs network access to its download CDN, which wasn't
-available in the sandbox this was built in. Also not yet packaged for macOS distribution (no
-`electron-builder`/notarization setup yet).
+content checked, not just its existence). **Now confirmed to launch in a real Electron
+window** and **packaged into a `.app`** via `electron-builder` (see Building below); the
+window renders and the renderer/IPC/Settings layer loads without error. Not yet exercised:
+driving a full request → plan → approve → file generation *through the GUI* on a machine with
+a real API key or Ollama configured (the code paths behind it are verified headlessly, but
+the end-to-end click-through hasn't been done).
+
+## Building a macOS app
+
+```
+npm install
+npm run pack   # unpacked LazyOffice.app in release/mac-arm64/ (no signing — fastest)
+npm run dist   # .dmg + .zip in release/ (still unsigned)
+```
+
+Both produce an **unsigned** app. macOS Gatekeeper will warn on first open (right-click →
+Open, or `xattr -dr com.apple.quarantine <app>`). Real distribution needs a Developer ID
+cert + notarization — not set up yet.
+
+### Setup gotcha (Node 26)
+
+`npm install` alone does **not** produce a working `electron` binary here: electron's bundled
+`extract-zip` (yauzl) fails partway through extraction on Node 26, leaving a ~256K stub and no
+`node_modules/electron/path.txt`. The cached zip itself is intact (`unzip -t` passes) — only
+the JS extractor is broken. Workaround: extract with macOS-native `ditto` and write `path.txt`
+manually:
+
+```
+ZIP=$(find ~/Library/Caches/electron -name 'electron-v*-darwin-arm64.zip' | head -1)
+rm -rf node_modules/electron/dist && mkdir -p node_modules/electron/dist
+ditto -x -k "$ZIP" node_modules/electron/dist
+printf 'Electron.app/Contents/MacOS/Electron' > node_modules/electron/path.txt
+```
+
+(`electron-builder`'s own extractor is unaffected — `npm run pack`/`dist` work fine.)
 
 ## Known gaps
 
-- No macOS packaging/code-signing/notarization yet (needed for real distribution outside your
-  own machine).
+- Unsigned build only — no code-signing/notarization yet (needed for distribution outside your
+  own machine); no app icon (uses the default Electron icon).
+- Full GUI click-through (request → plan → approve → file) not yet driven on a machine with a
+  live API key; only the underlying code paths are verified headlessly.
 - No automated tests beyond the manual verification during development.
 - Settings are stored in plaintext JSON (`config.json` in the OS user-data dir) — fine for a
   prototype, not for a shipped app holding a real API key.

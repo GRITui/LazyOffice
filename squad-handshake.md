@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T12:10:00Z
+Last Updated: 2026-07-09T16:32:28Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -40,17 +40,27 @@ been built — both tracks so far were implemented directly to prove the end-to-
   now runs as a JSON-repair step when the Code Engine's output fails to parse; Generalist
   (Llama 3.1 8B) drafts the delivery summary now shown in the result card. All 5 First Goal
   doc roles have a real call site (previously 3 of 5).
+* `desktop-app/` first real Electron run + P1 fixes (TSK-003, same branch, not yet committed):
+  confirmed the app launches (`npm start` and packaged `.app`); added the missing
+  `OLLAMA_SYNTAX_MODEL`/`OLLAMA_GENERALIST_MODEL` Settings fields so all 5 roles are
+  configurable; added `electron-builder` packaging (`npm run pack`/`dist`). Documented the
+  Node-26 `extract-zip` install gotcha in the README.
 
 ## Blockers & QA Failures
 
-* TSK-003 (`desktop-app/`): not yet run inside an actual Electron window — installing the
-  `electron` binary needs network access to its download CDN, unavailable in the sandbox
-  this was built in. `engine.js`/`docgen.js` were instead logic-tested directly under plain
-  Node against local stand-in Claude/Ollama servers, for all three output types — each
-  generated `.docx`/`.xlsx`/`.pptx` was unzipped and its actual content checked (headers/
-  rows for the spreadsheet, slide text for the presentation), not just confirmed to exist.
-  Needs a real run on the Owner's machine to confirm the Electron window/IPC/Settings-panel
-  layer itself works before calling TSK-003 done.
+* RESOLVED (2026-07-09): TSK-003 now runs in a real Electron window. `npm start` and the
+  `electron-builder`-packaged `LazyOffice.app` both launch; the renderer/IPC/Settings layer
+  loads from `app.asar` without error (verified via the live renderer helper process). Setup
+  gotcha found and documented: on Node 26, electron's bundled `extract-zip` fails mid-extract
+  and leaves a broken ~256K stub — the binary must be extracted with macOS `ditto` + a manual
+  `path.txt` (see `desktop-app/README.md`); `electron-builder`'s own extractor is fine.
+* Two P1 fixes landed alongside the run: (1) the Settings panel now exposes all 5 First Goal
+  roles — `OLLAMA_SYNTAX_MODEL` and `OLLAMA_GENERALIST_MODEL` were called in `docgen.js` but
+  had no UI/IPC field (added to `main.js` `SETTINGS_KEYS` and `renderer/index.html`);
+  (2) `electron-builder` packaging config added to `package.json` (`npm run pack`/`dist`).
+* Still open before TSK-003 is "done": full GUI click-through (request → plan → approve →
+  file) on a machine with a live API key/Ollama has not been driven — only the underlying
+  code paths are verified headlessly. Build is unsigned with the default Electron icon.
 * No QA-Squad pass has run against either track yet.
 
 ## Cross-Squad Requests
