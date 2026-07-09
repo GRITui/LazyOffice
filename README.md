@@ -12,7 +12,8 @@ the full multi-model pipeline from the First Goal doc.
   - `Code.gs` — server logic: calls the Anthropic API to draft a plan, then (on approval) to
     draft document content, and creates the Google Doc via `DocumentApp`.
   - `appsscript.json` — manifest; deployed with `executeAs: USER_DEPLOYING` /
-    `access: MYSELF` by default (change this once the intended access model is decided).
+    `access: ANYONE` — any signed-in Google account can open the deployment (no domain
+    restriction, no anonymous access).
 
 ## Deploying
 
@@ -32,7 +33,8 @@ the full multi-model pipeline from the First Goal doc.
 - The Anthropic API call in `Code.gs` is a **temporary stand-in** for the First Goal doc's
   5-model pipeline (Qwen/DeepSeek/Phi-4/Granite/Llama). Replacing it with the self-hosted
   inference server is its own follow-up milestone (`TSK-002`).
-- The GAS Web App's access model (who can open it) hasn't been decided yet — currently
-  locked to the deploying account only.
+- The GAS Web App's access model is confirmed: any signed-in Google account can open it
+  (`access: ANYONE` in `appsscript.json`), not restricted to a Workspace domain and not
+  open to anonymous/anyone-with-link access.
 - Squad-driven backlog automation (`backlog-inbox.md`, `squad-handshake.md`) is seeded but
   this milestone was built directly rather than through automated squad execution.
