@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T00:00:00Z
+Last Updated: 2026-07-09T08:30:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -28,8 +28,10 @@ directly to prove the end-to-end flow first.
 
 ## Cross-Squad Requests
 
-* Need `Researcher-Squad` to scope TSK-002 (self-hosted inference server: GPU host choice,
-  first model to load, networking so GAS can reach it).
+* Resolved (2026-07-09): Owner decided TSK-002's hosting target (own hardware) and first
+  model to load (Qwen3.5-9B Orchestrator) — see `backlog-inbox.md`. TSK-002 is now
+  `READY_FOR_PM`. Still need `Researcher-Squad`/`Engineer-Squad` to scope the on-prem
+  networking so GAS can reach the server.
 * Need `Owner` to confirm the GAS Web App access model (domain-restricted / anyone-with-link
   / sign-in required) before wider deployment, and to confirm the Milestone 1 stand-in choice
   (Claude via Anthropic API) or override it.

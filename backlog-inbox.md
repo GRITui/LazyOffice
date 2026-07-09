@@ -15,9 +15,9 @@ Do not edit outside the XML tags. PM Agents must only parse items marked READY_F
 <task_item>
   <id>TSK-002</id>
   <source>RESEARCHER_SQUAD</source>
-  <status>NEEDS_OWNER_REVIEW</status>
+  <status>READY_FOR_PM</status>
   <priority>MEDIUM</priority>
   <title>Provision self-hosted inference server for the 5-stage pipeline</title>
-  <description>Stand up a GPU-backed inference server (e.g. vLLM/Ollama) reachable over HTTP from Google Apps Script, serving the First Goal doc's pipeline models (Qwen3.5-9B Orchestrator, DeepSeek-R1-Distill-Qwen-7B Planner, Phi-4-mini Syntax Enforcer, Granite 4.1 8B Code Engine, Llama 3.1 8B Generalist), then replace the Milestone 1 Claude stand-in.</description>
-  <researcher_notes>Needs owner decision on hosting target (own hardware vs cloud GPU instance) and which model to load first; not started.</researcher_notes>
+  <description>Stand up a GPU-backed inference server on owned/on-prem hardware (e.g. vLLM/Ollama) reachable over HTTP from Google Apps Script, serving the First Goal doc's pipeline models. Load Qwen3.5-9B (Orchestrator) first, then the remaining models (DeepSeek-R1-Distill-Qwen-7B Planner, Phi-4-mini Syntax Enforcer, Granite 4.1 8B Code Engine, Llama 3.1 8B Generalist), then replace the Milestone 1 Claude stand-in.</description>
+  <researcher_notes>Owner decision (2026-07-09): host on own hardware (not cloud GPU); load Qwen3.5-9B Orchestrator first to prove the routing/coordination layer, then the remaining 4 models. Networking so GAS can reach the on-prem server is still open and owned by Researcher-Squad/Engineer-Squad.</researcher_notes>
 </task_item>
