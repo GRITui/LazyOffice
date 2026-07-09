@@ -689,7 +689,18 @@
       function loadSettings() {
         window.desktop.getSettings().then(function (settings) {
           document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'claude';
-          document.getElementById('setting-api-key').value = settings.ANTHROPIC_API_KEY || '';
+          // The stored API key is never sent back to the UI. Leave the field blank
+          // and reflect its state via the placeholder; typing a new value replaces
+          // it, leaving it blank keeps the existing one (see saveSettings).
+          var apiKeyField = document.getElementById('setting-api-key');
+          apiKeyField.value = '';
+          if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
+            apiKeyField.placeholder = 'Stored key could not be read on this machine — re-enter it';
+          } else if (settings.ANTHROPIC_API_KEY_SET) {
+            apiKeyField.placeholder = '•••••••• stored — leave blank to keep, or type to replace';
+          } else {
+            apiKeyField.placeholder = 'sk-ant-...';
+          }
           document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
           document.getElementById('setting-orchestrator-model').value = settings.OLLAMA_ORCHESTRATOR_MODEL || '';
           document.getElementById('setting-planner-model').value = settings.OLLAMA_PLANNER_MODEL || '';
@@ -702,7 +713,6 @@
       function saveSettings() {
         var settings = {
           LLM_PROVIDER: document.getElementById('setting-provider').value,
-          ANTHROPIC_API_KEY: document.getElementById('setting-api-key').value.trim(),
           OLLAMA_URL: document.getElementById('setting-ollama-url').value.trim(),
           OLLAMA_ORCHESTRATOR_MODEL: document.getElementById('setting-orchestrator-model').value.trim(),
           OLLAMA_PLANNER_MODEL: document.getElementById('setting-planner-model').value.trim(),
@@ -710,6 +720,11 @@
           OLLAMA_CODE_ENGINE_MODEL: document.getElementById('setting-code-engine-model').value.trim(),
           OLLAMA_GENERALIST_MODEL: document.getElementById('setting-generalist-model').value.trim()
         };
+        // Only overwrite the stored API key when the user actually typed a new one;
+        // a blank field means "keep the existing key" and is omitted entirely so it
+        // is never clobbered.
+        var apiKey = document.getElementById('setting-api-key').value.trim();
+        if (apiKey) settings.ANTHROPIC_API_KEY = apiKey;
         window.desktop.setSettings(settings).then(function () {
           toggleSettings();
           refreshProviderStatus();
@@ -722,8 +737,10 @@
           var el = document.getElementById('provider-status');
           if (provider === 'ollama') {
             el.textContent = 'Using local Ollama (' + (settings.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions') + ')';
+          } else if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
+            el.textContent = 'Using Claude API — stored key could not be read on this machine, open Settings to re-enter it';
           } else {
-            el.textContent = settings.ANTHROPIC_API_KEY ? 'Using Claude API' : 'Using Claude API — no API key set yet, open Settings';
+            el.textContent = settings.ANTHROPIC_API_KEY_SET ? 'Using Claude API' : 'Using Claude API — no API key set yet, open Settings';
           }
         });
       }

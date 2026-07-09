@@ -51,10 +51,7 @@ ImageDraw.Draw(sh).rounded_rectangle([dx + 14, dy + 20, dx + doc_w + 14, dy + do
 img.alpha_composite(sh)
 # sheet body (with folded top-right corner)
 d.rounded_rectangle([dx, dy, dx + doc_w, dy + doc_h], radius=26, fill=PAPER)
-# cut + draw the fold
-d.polygon([(dx + doc_w - fold, dy), (dx + doc_w, dy + fold), (dx + doc_w - fold, dy + fold)], fill=(225, 228, 236))
-d.polygon([(dx + doc_w - fold, dy), (dx + doc_w, dy), (dx + doc_w, dy + fold)], fill=PAPER)  # keep square top-right white-ish
-# redo clean fold triangle look
+# square off the top-right corner, then draw the fold triangle over it
 d.rectangle([dx + doc_w - fold, dy, dx + doc_w, dy + fold], fill=PAPER)
 d.polygon([(dx + doc_w - fold, dy), (dx + doc_w, dy + fold), (dx + doc_w - fold, dy + fold)], fill=(216, 220, 230))
 

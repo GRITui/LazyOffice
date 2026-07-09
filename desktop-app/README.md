@@ -65,8 +65,12 @@ Runs in a real Electron window and is **packaged into a `.app`** (with a custom 
 the real renderer** — for each of the three output types, a request → plan (Get Plan) →
 approve (Approve & Generate) → file-write cycle was exercised against a local stand-in LLM,
 and each resulting `.docx`/`.xlsx`/`.pptx` was opened and its content verified (real
-headings/rows/slides, and a native chart in the deck), not just its existence. The API key is
-encrypted at rest via the OS keychain (Electron `safeStorage`), not stored in plaintext.
+headings/rows/slides, and a native chart in the deck), not just its existence. On macOS (this
+app's target) the API key is encrypted at rest via the OS keychain (Electron `safeStorage`);
+a pre-existing plaintext key is migrated to encrypted on first launch. On a platform with no
+credential store available, it falls back to plaintext with a console warning rather than
+refusing to start — so the encrypted-at-rest guarantee holds on macOS/Windows but not
+necessarily on a bare Linux box.
 
 Remaining before public distribution: code-signing + notarization (needs an Apple Developer
 ID — see below), and a formal QA pass.

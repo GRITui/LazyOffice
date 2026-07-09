@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T16:49:05Z
+Last Updated: 2026-07-09T17:06:49Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -55,6 +55,18 @@ been built — both tracks so far were implemented directly to prove the end-to-
   Electron `safeStorage` (OS keychain), transparent to callers, with plaintext fallback when
   encryption is unavailable (verified with an 8-assertion headless Electron test). README now
   documents the code-signing/notarization steps that remain (owner-provided Apple cert).
+
+* `desktop-app/` QA pass + fixes (TSK-003, not yet committed): ran a high-effort multi-agent
+  code review over the P1 + polish commits; it found 8 confirmed issues, all in the just-added
+  code. Fixed all: the serious ones were in the `safeStorage` change — a decrypt-failure +
+  blank-Save combination that could permanently clobber a stored key, plus a present-but-
+  unreadable key reading as unset. Redesign: secrets are never sent to the renderer (getSettings
+  returns SET/UNREADABLE flags only), a blank API-key field is omitted from Save so it never
+  overwrites a stored key, `maybeDecrypt` now gates on `encryptionAvailable()` symmetrically,
+  a startup `migrateSecrets()` encrypts any legacy plaintext key, `setProperties`/`getProperties`
+  batch to one read/write, plaintext fallback now warns, and dead icon-drawing code was removed.
+  Verified: 16-assertion headless config-store test + 9-assertion CDP Settings-flow test (incl.
+  the no-clobber scenario) all pass.
 
 ## Blockers & QA Failures
 
