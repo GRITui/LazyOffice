@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <style>
+      body { font-family: Arial, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #202124; }
+      h1 { font-size: 20px; }
+      textarea { width: 100%; box-sizing: border-box; padding: 8px; font-size: 14px; font-family: inherit; }
+      button { padding: 8px 16px; font-size: 14px; cursor: pointer; margin-top: 8px; }
+      button:disabled { cursor: default; opacity: 0.6; }
+      #plan-box, #result-box { margin-top: 16px; padding: 12px; border: 1px solid #ccc; border-radius: 6px; display: none; }
+      #status { margin-top: 8px; font-style: italic; color: #555; min-height: 1.2em; }
+      a.doc-link { font-weight: bold; word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <h1>LazyOffice — Document Assistant</h1>
+    <p>Describe the document you want, review the plan, then approve to generate a real Google Doc.</p>
+
+    <textarea id="request" rows="3" placeholder="e.g. Generate a one-page project status update for the LazyOffice MVP"></textarea>
+    <br>
+    <button id="plan-btn" onclick="requestPlan()">Get Plan</button>
+
+    <div id="plan-box">
+      <strong>Proposed plan:</strong>
+      <p id="plan-text"></p>
+      <button id="approve-btn" onclick="approve()">Approve &amp; Generate</button>
+    </div>
+
+    <div id="result-box">
+      <strong>Done:</strong>
+      <p><a class="doc-link" id="doc-link" href="#" target="_blank"></a></p>
+    </div>
+
+    <div id="status"></div>
+
+    <script>
+      var currentRequest = '';
+
+      function setStatus(msg) {
+        document.getElementById('status').textContent = msg || '';
+      }
+
+      function requestPlan() {
+        currentRequest = document.getElementById('request').value.trim();
+        if (!currentRequest) {
+          setStatus('Enter a request first.');
+          return;
+        }
+        document.getElementById('plan-box').style.display = 'none';
+        document.getElementById('result-box').style.display = 'none';
+        setStatus('Thinking through a plan...');
+        document.getElementById('plan-btn').disabled = true;
+
+        google.script.run
+          .withSuccessHandler(function (plan) {
+            document.getElementById('plan-text').textContent = plan;
+            document.getElementById('plan-box').style.display = 'block';
+            setStatus('');
+            document.getElementById('plan-btn').disabled = false;
+          })
+          .withFailureHandler(function (err) {
+            setStatus('Error: ' + err.message);
+            document.getElementById('plan-btn').disabled = false;
+          })
+          .getPlan(currentRequest);
+      }
+
+      function approve() {
+        setStatus('Generating your document...');
+        document.getElementById('approve-btn').disabled = true;
+
+        google.script.run
+          .withSuccessHandler(function (url) {
+            var link = document.getElementById('doc-link');
+            link.href = url;
+            link.textContent = url;
+            document.getElementById('result-box').style.display = 'block';
+            setStatus('');
+            document.getElementById('approve-btn').disabled = false;
+          })
+          .withFailureHandler(function (err) {
+            setStatus('Error: ' + err.message);
+            document.getElementById('approve-btn').disabled = false;
+          })
+          .generateDoc(currentRequest);
+      }
+    </script>
+  </body>
+</html>
