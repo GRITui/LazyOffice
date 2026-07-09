@@ -22,54 +22,95 @@ function outputPath(title, fallback, extension) {
   return path.join(OUTPUT_DIR, sanitizeFilename(title, fallback) + '-' + Date.now() + '.' + extension);
 }
 
+function extractJson(text) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch (err) {
+    return null;
+  }
+}
+
 /**
  * Soft-fallback JSON extraction per the Squad Setup doc's crash-proofing
- * convention: pull the object out with a regex rather than a strict parser,
- * and degrade to a plain single-item shape instead of throwing if malformed.
+ * convention, now with a repair step in the middle: if the model's raw
+ * response doesn't parse into the expected schema, the Syntax Enforcer
+ * (Phi-4-mini in the First Goal doc's pipeline) gets one attempt to
+ * reformat it before degrading to a plain single-item fallback. Never
+ * throws either way.
  */
-function parseDocumentJson(raw) {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      const parsed = JSON.parse(match[0]);
-      if (parsed && parsed.title && Array.isArray(parsed.sections)) {
-        return parsed;
-      }
-    } catch (err) {
-      // fall through to soft fallback below
-    }
+async function parseWithSchema(raw, schemaDescription, isValid, fallback) {
+  let parsed = extractJson(raw);
+  if (parsed && isValid(parsed)) {
+    return parsed;
   }
-  return { title: 'Untitled Document', sections: [{ heading: '', body: raw }] };
+
+  try {
+    const repairPrompt = 'Convert the following text into valid JSON matching exactly this ' +
+      'shape: ' + schemaDescription + '. If it already contains matching JSON, extract and ' +
+      'return it verbatim. Respond ONLY with the JSON object — no markdown, no commentary.';
+    const repaired = await callLLM(repairPrompt, raw, 'syntax_enforcer');
+    parsed = extractJson(repaired);
+    if (parsed && isValid(parsed)) {
+      return parsed;
+    }
+  } catch (err) {
+    // repair attempt failed (e.g. Ollama unreachable) — fall through to fallback
+  }
+
+  return fallback(raw);
+}
+
+function parseDocumentJson(raw) {
+  return parseWithSchema(
+    raw,
+    '{"title": string, "sections": [{"heading": string, "body": string}, ...]}',
+    (p) => p && p.title && Array.isArray(p.sections),
+    (text) => ({ title: 'Untitled Document', sections: [{ heading: '', body: text }] })
+  );
 }
 
 function parseSpreadsheetJson(raw) {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      const parsed = JSON.parse(match[0]);
-      if (parsed && parsed.title && Array.isArray(parsed.headers) && Array.isArray(parsed.rows)) {
-        return parsed;
-      }
-    } catch (err) {
-      // fall through to soft fallback below
-    }
-  }
-  return { title: 'Untitled Spreadsheet', sheetName: 'Sheet1', headers: ['Content'], rows: [[raw]] };
+  return parseWithSchema(
+    raw,
+    '{"title": string, "sheetName": string, "headers": [string, ...], ' +
+      '"rows": [[string|number, ...], ...]} (every row array the same length as headers)',
+    (p) => p && p.title && Array.isArray(p.headers) && Array.isArray(p.rows),
+    (text) => ({ title: 'Untitled Spreadsheet', sheetName: 'Sheet1', headers: ['Content'], rows: [[text]] })
+  );
 }
 
 function parseSlidesJson(raw) {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      const parsed = JSON.parse(match[0]);
-      if (parsed && parsed.title && Array.isArray(parsed.slides)) {
-        return parsed;
-      }
-    } catch (err) {
-      // fall through to soft fallback below
-    }
+  return parseWithSchema(
+    raw,
+    '{"title": string, "slides": [{"heading": string, "bullets": [string, ...]}, ...]}',
+    (p) => p && p.title && Array.isArray(p.slides),
+    (text) => ({ title: 'Untitled Presentation', slides: [{ heading: 'Content', bullets: [text] }] })
+  );
+}
+
+const OUTPUT_TYPE_NOUN = { document: 'document', spreadsheet: 'spreadsheet', presentation: 'presentation' };
+
+/**
+ * Stage 3 of the HITL flow, run after the file is already on disk: the
+ * Generalist (Llama 3.1 8B Instruct in the First Goal doc's pipeline)
+ * drafts a short delivery message. Soft-fails to a plain default message
+ * rather than throwing — the file is already written by this point, so a
+ * summarizer hiccup shouldn't block the user from getting it.
+ */
+async function summarizeResult(outputType, parsed, filePath) {
+  const noun = OUTPUT_TYPE_NOUN[outputType] || 'file';
+  const systemPrompt = 'You are a status summarizer for an office document generator. Given ' +
+    'the ' + noun + ' that was just created and where it was saved, write a short (1-2 ' +
+    'sentence) friendly confirmation message for the user — mention what was created and that ' +
+    'it is ready to open. Plain sentences only, no markdown.';
+  const userPrompt = 'Title: ' + parsed.title + '\nSaved to: ' + filePath;
+  try {
+    return await callLLM(systemPrompt, userPrompt, 'generalist');
+  } catch (err) {
+    return 'Your ' + noun + ' "' + parsed.title + '" is ready.';
   }
-  return { title: 'Untitled Presentation', slides: [{ heading: 'Content', bullets: [raw] }] };
 }
 
 async function writeDocx(parsed) {
@@ -128,7 +169,8 @@ async function writePptx(parsed) {
  * Stage 2 of the HITL flow, run only after owner approval: draft document
  * content and write the .docx file. Same prompt/parsing logic as Code.gs's
  * generateDoc — only the "create the file" step differs (local .docx here
- * instead of DocumentApp.create in Drive).
+ * instead of DocumentApp.create in Drive). Returns { filePath, summary } —
+ * see summarizeResult for the Generalist's role in the summary.
  */
 async function generateDocument(userRequest, attachments) {
   const systemPrompt = 'You are a document content generator. Given a user\'s request and any ' +
@@ -138,7 +180,9 @@ async function generateDocument(userRequest, attachments) {
     '{"title": string, "sections": [{"heading": string, "body": string}]}. ' +
     'No markdown, no code fences, no commentary — just the JSON object.';
   const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
-  return writeDocx(parseDocumentJson(raw));
+  const parsed = await parseDocumentJson(raw);
+  const filePath = await writeDocx(parsed);
+  return { filePath: filePath, summary: await summarizeResult('document', parsed, filePath) };
 }
 
 async function generateSpreadsheet(userRequest, attachments) {
@@ -149,7 +193,9 @@ async function generateSpreadsheet(userRequest, attachments) {
     '"rows": [[string|number, ...], ...]} where every row array has the same length as ' +
     'headers. No markdown, no code fences, no commentary — just the JSON object.';
   const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
-  return writeXlsx(parseSpreadsheetJson(raw));
+  const parsed = await parseSpreadsheetJson(raw);
+  const filePath = writeXlsx(parsed);
+  return { filePath: filePath, summary: await summarizeResult('spreadsheet', parsed, filePath) };
 }
 
 async function generatePresentation(userRequest, attachments) {
@@ -160,7 +206,9 @@ async function generatePresentation(userRequest, attachments) {
     '[{"heading": string, "bullets": [string, ...]}, ...]}. Keep each slide to 3-5 short ' +
     'bullets. No markdown, no code fences, no commentary — just the JSON object.';
   const raw = await callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
-  return writePptx(parseSlidesJson(raw));
+  const parsed = await parseSlidesJson(raw);
+  const filePath = await writePptx(parsed);
+  return { filePath: filePath, summary: await summarizeResult('presentation', parsed, filePath) };
 }
 
 const GENERATORS = {
@@ -171,7 +219,8 @@ const GENERATORS = {
 
 /**
  * Single entry point the IPC layer calls. outputType is one of
- * 'document'|'spreadsheet'|'presentation' (defaults to 'document').
+ * 'document'|'spreadsheet'|'presentation' (defaults to 'document'). Resolves
+ * to { filePath, summary }.
  */
 function generateOutput(userRequest, attachments, outputType) {
   const generator = GENERATORS[outputType] || GENERATORS.document;

@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T11:35:00Z
+Last Updated: 2026-07-09T12:10:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -36,6 +36,10 @@ been built — both tracks so far were implemented directly to prove the end-to-
   `.xlsx` (`xlsx`) and `.pptx` (`pptxgenjs`) alongside `.docx`, behind a
   Document/Spreadsheet/Presentation selector in `renderer/index.html`. `generateOutput`
   replaces the single-format `generateDoc` as the IPC entry point.
+* `desktop-app/` remaining-role wiring (TSK-003, same branch): Syntax Enforcer (Phi-4-mini)
+  now runs as a JSON-repair step when the Code Engine's output fails to parse; Generalist
+  (Llama 3.1 8B) drafts the delivery summary now shown in the result card. All 5 First Goal
+  doc roles have a real call site (previously 3 of 5).
 
 ## Blockers & QA Failures
 
