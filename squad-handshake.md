@@ -82,10 +82,12 @@ been built — both tracks so far were implemented directly to prove the end-to-
   (2) `electron-builder` packaging config added to `package.json` (`npm run pack`/`dist`).
 * RESOLVED (2026-07-09): the full GUI flow (request → Get Plan → Approve & Generate → file)
   is now driven end-to-end for all 3 output types via CDP against the real renderer; icon and
-  at-rest key encryption added. Only two things remain before TSK-003 is fully "done":
-  (1) code-signing + notarization, blocked on an owner-provided Apple Developer ID cert
-  (steps documented in `desktop-app/README.md`); (2) a formal QA-Squad pass.
-* No QA-Squad pass has run against either track yet.
+  at-rest key encryption added. A high-effort code-review QA pass ran over the desktop track
+  and its 8 findings were all fixed and re-verified (see the QA entry above). The single
+  remaining item before TSK-003 is fully "done": code-signing + notarization, blocked on an
+  owner-provided Apple Developer ID cert (steps documented in `desktop-app/README.md`).
+* QA status: the desktop track (TSK-003) has had a code-review pass (fixes verified). The GAS
+  webapp track (TSK-001) has not had a dedicated QA pass yet.
 
 ## Cross-Squad Requests
 
