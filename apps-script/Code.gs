@@ -55,8 +55,11 @@ function getPlan(userRequest, attachments) {
   var systemPrompt = 'You are a planning assistant for an office document generator. ' +
     'Given a user\'s request and any reference material provided, respond with a short ' +
     '(2-4 sentence) plain-language plan describing the Google Doc you will create: its ' +
-    'title and the sections/content it will contain. Plain sentences only — no code, XML, ' +
-    'or markdown formatting.';
+    'title and the sections/content it will contain. If a reference item is tagged with a ' +
+    'role, use "raw data" items as the source of facts/numbers to cite, mirror the ' +
+    'structure/sections of an "output template" item, and match the tone and format of a ' +
+    '"reference report/presentation" item. Plain sentences only — no code, XML, or markdown ' +
+    'formatting.';
   return callClaude(systemPrompt, userRequest + buildAttachmentContext(attachments));
 }
 
@@ -65,8 +68,10 @@ function getPlan(userRequest, attachments) {
  * content and create the real Google Doc.
  */
 function generateDoc(userRequest, attachments) {
-  var systemPrompt = 'You are a document content generator. Given a user\'s request, ' +
-    'respond ONLY with a JSON object of the form ' +
+  var systemPrompt = 'You are a document content generator. Given a user\'s request and any ' +
+    'reference material (cite facts from "raw data" items, mirror the structure of an ' +
+    '"output template" item, match the tone/format of a "reference report/presentation" ' +
+    'item), respond ONLY with a JSON object of the form ' +
     '{"title": string, "sections": [{"heading": string, "body": string}]}. ' +
     'No markdown, no code fences, no commentary — just the JSON object.';
   var raw = callClaude(systemPrompt, userRequest + buildAttachmentContext(attachments));
@@ -91,6 +96,13 @@ function generateDoc(userRequest, attachments) {
 var MAX_INLINE_TEXT_CHARS = 4000;
 var TEXT_MIME_PATTERN = /^text\/|json$|csv$/;
 var TEXT_FILENAME_PATTERN = /\.(txt|md|csv|json)$/i;
+var ROLE_VALUES = ['raw_data', 'template', 'reference_report', 'other'];
+var ROLE_LABELS = {
+  raw_data: 'raw data',
+  template: 'output template',
+  reference_report: 'reference report/presentation',
+  other: 'other reference'
+};
 
 /**
  * Turns UI-attached files/links into extra prompt context. Follows the
@@ -105,8 +117,9 @@ function buildAttachmentContext(attachments) {
   var parts = [];
   attachments.forEach(function (item) {
     if (!item) return;
+    var roleTag = item.role ? ' [role: ' + (ROLE_LABELS[item.role] || item.role) + ']' : '';
     if (item.type === 'link' && item.url) {
-      parts.push('Reference link: ' + item.url);
+      parts.push('Reference link' + roleTag + ': ' + item.url);
       return;
     }
     if (item.type === 'file' && item.name) {
@@ -114,17 +127,89 @@ function buildAttachmentContext(attachments) {
       if (isText && item.base64) {
         try {
           var text = Utilities.newBlob(Utilities.base64Decode(item.base64)).getDataAsString();
-          parts.push('Reference file "' + item.name + '" contents:\n' + text.slice(0, MAX_INLINE_TEXT_CHARS));
+          parts.push('Reference file "' + item.name + '"' + roleTag + ' contents:\n' + text.slice(0, MAX_INLINE_TEXT_CHARS));
           return;
         } catch (err) {
           // fall through to filename-only reference below
         }
       }
-      parts.push('Reference file "' + item.name + '" (' + (item.mimeType || 'unknown type') +
+      parts.push('Reference file "' + item.name + '"' + roleTag + ' (' + (item.mimeType || 'unknown type') +
         ') — content not inlined; treat as contextual reference only.');
     }
   });
   return parts.length ? '\n\nReference material provided by the user:\n' + parts.join('\n\n') : '';
+}
+
+/**
+ * Classifies each UI-attached file/link as raw data, an output template, a
+ * reference report/presentation, or other — so the plan/generate stages can
+ * treat each attachment according to its actual purpose instead of lumping
+ * them all together. The UI shows this to the owner for confirmation before
+ * drafting the plan.
+ */
+function classifyAttachments(attachments) {
+  if (!attachments || !attachments.length) {
+    return [];
+  }
+  var systemPrompt = 'You classify reference files/links attached to a document-generation ' +
+    'request. For each item, decide which single role it plays: "raw_data" (source ' +
+    'numbers/facts to pull from), "template" (defines the structure, sections, or ' +
+    'formatting the output should follow), "reference_report" (an example finished ' +
+    'report/presentation similar to the desired final output), or "other" (none of the ' +
+    'above). Respond ONLY with a JSON array of objects shaped ' +
+    '{"id": string, "role": "raw_data"|"template"|"reference_report"|"other", ' +
+    '"reason": string (max 12 words)}. No markdown, no commentary — just the JSON array.';
+
+  var userPrompt = 'Classify these attachments:\n\n' + attachments.map(function (item) {
+    if (item.type === 'link') {
+      return 'id: ' + item.id + '\nlink: ' + item.url;
+    }
+    var descriptor = 'id: ' + item.id + '\nfilename: ' + item.name + '\ntype: ' + (item.mimeType || 'unknown');
+    var isText = TEXT_MIME_PATTERN.test(item.mimeType || '') || TEXT_FILENAME_PATTERN.test(item.name || '');
+    if (isText && item.base64) {
+      try {
+        var text = Utilities.newBlob(Utilities.base64Decode(item.base64)).getDataAsString();
+        descriptor += '\nexcerpt: ' + text.slice(0, 500);
+      } catch (err) {
+        // no excerpt available; classify on filename/type alone
+      }
+    }
+    return descriptor;
+  }).join('\n\n');
+
+  var raw = callClaude(systemPrompt, userPrompt);
+  return parseAttachmentRoles(raw, attachments);
+}
+
+/**
+ * Soft-fallback parsing of the role-classification response: pull the JSON
+ * array out with a regex, validate each entry, and default anything
+ * missing/malformed to "other" rather than throwing.
+ */
+function parseAttachmentRoles(raw, attachments) {
+  var byId = {};
+  var match = raw.match(/\[[\s\S]*\]/);
+  if (match) {
+    try {
+      var parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(function (entry) {
+          if (entry && entry.id) {
+            byId[entry.id] = {
+              id: entry.id,
+              role: ROLE_VALUES.indexOf(entry.role) !== -1 ? entry.role : 'other',
+              reason: typeof entry.reason === 'string' ? entry.reason : 'Could not classify automatically.'
+            };
+          }
+        });
+      }
+    } catch (err) {
+      // fall through to per-item fallback below
+    }
+  }
+  return attachments.map(function (item) {
+    return byId[item.id] || { id: item.id, role: 'other', reason: 'Could not classify automatically.' };
+  });
 }
 
 /**

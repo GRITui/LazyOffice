@@ -208,6 +208,32 @@
         cursor: pointer;
       }
       .attachment-list .remove-btn:hover { color: var(--error-text); background: transparent; }
+      .roles-hint { margin: 0 0 10px; font-size: 13px; color: var(--text-muted); }
+      .roles-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+      .roles-list li {
+        padding: 10px 12px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .roles-item-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .roles-item-name { font-size: 13px; font-weight: 600; word-break: break-all; }
+      .roles-item-top select {
+        font-size: 13px;
+        font-family: inherit;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--text);
+      }
+      .roles-item-reason { margin: 6px 0 0; font-size: 12px; color: var(--text-muted); font-style: italic; }
     </style>
   </head>
   <body>
@@ -233,6 +259,16 @@
 
     <div class="actions">
       <button id="plan-btn" onclick="requestPlan()">Get Plan</button>
+    </div>
+
+    <div id="roles-box" class="card">
+      <p class="card-label">Confirm file roles</p>
+      <p class="roles-hint">I'll use these to draft the plan — adjust any that look wrong, then confirm.</p>
+      <ul id="roles-list" class="roles-list"></ul>
+      <div class="actions">
+        <button id="confirm-roles-btn" onclick="confirmRolesAndDraftPlan()">Confirm &amp; Draft Plan</button>
+        <button class="secondary" onclick="cancelRoleReview()">Back</button>
+      </div>
     </div>
 
     <div id="plan-box" class="card">
@@ -285,8 +321,36 @@
           setTimeout(function () {
             onSuccess('https://docs.google.com/document/d/MOCK_PREVIEW_ONLY/edit');
           }, 700);
+        },
+        classifyAttachments: function (attachmentList, onSuccess) {
+          setTimeout(function () {
+            var roles = (attachmentList || []).map(function (a) {
+              var name = (a.type === 'file' ? a.name : a.url || '').toLowerCase();
+              var role = 'raw_data';
+              var reason = 'Looks like source data to pull from.';
+              if (name.indexOf('template') !== -1) {
+                role = 'template';
+                reason = 'Filename suggests this defines the structure/formatting to follow.';
+              } else if (/report|presentation|deck|slides/.test(name)) {
+                role = 'reference_report';
+                reason = 'Filename suggests this is an example of the finished output.';
+              } else if (a.type === 'link') {
+                role = 'reference_report';
+                reason = 'Linked material — treated as reference for now, check and adjust.';
+              }
+              return { id: a.id, role: role, reason: reason + ' (mock classification)' };
+            });
+            onSuccess(roles);
+          }, 600);
         }
       };
+
+      var ROLE_OPTIONS = [
+        { value: 'raw_data', label: 'Raw data' },
+        { value: 'template', label: 'Output template' },
+        { value: 'reference_report', label: 'Reference report/presentation' },
+        { value: 'other', label: 'Other' }
+      ];
 
       function callServer(fnName, args, onSuccess, onError) {
         if (isGasEnv) {
@@ -325,6 +389,50 @@
       function removeAttachment(id) {
         attachments = attachments.filter(function (a) { return a.id !== id; });
         renderAttachments();
+      }
+
+      function applyRoles(roles) {
+        var byId = {};
+        (roles || []).forEach(function (r) { byId[r.id] = r; });
+        attachments.forEach(function (a) {
+          var match = byId[a.id];
+          a.role = (match && match.role) || 'other';
+          a.roleReason = (match && match.reason) || 'Could not classify automatically — please check.';
+        });
+      }
+
+      function renderRolesList() {
+        var list = document.getElementById('roles-list');
+        list.innerHTML = '';
+        attachments.forEach(function (a) {
+          var li = document.createElement('li');
+
+          var top = document.createElement('div');
+          top.className = 'roles-item-top';
+          var label = document.createElement('span');
+          label.className = 'roles-item-name';
+          label.textContent = a.type === 'file' ? a.name : a.url;
+          var select = document.createElement('select');
+          select.setAttribute('aria-label', 'Role for ' + (a.type === 'file' ? a.name : a.url));
+          ROLE_OPTIONS.forEach(function (opt) {
+            var o = document.createElement('option');
+            o.value = opt.value;
+            o.textContent = opt.label;
+            if (a.role === opt.value) o.selected = true;
+            select.appendChild(o);
+          });
+          select.onchange = function () { a.role = select.value; };
+          top.appendChild(label);
+          top.appendChild(select);
+
+          var reason = document.createElement('p');
+          reason.className = 'roles-item-reason';
+          reason.textContent = a.roleReason || '';
+
+          li.appendChild(top);
+          li.appendChild(reason);
+          list.appendChild(li);
+        });
       }
 
       function makeId() {
@@ -417,6 +525,7 @@
         renderAttachments();
         document.getElementById('request').value = '';
         document.getElementById('link-input').value = '';
+        document.getElementById('roles-box').style.display = 'none';
         document.getElementById('plan-box').style.display = 'none';
         document.getElementById('result-box').style.display = 'none';
         setStatus('');
@@ -428,8 +537,44 @@
           setStatus('Enter a request first.', true, false);
           return;
         }
+        document.getElementById('roles-box').style.display = 'none';
         document.getElementById('plan-box').style.display = 'none';
         document.getElementById('result-box').style.display = 'none';
+
+        if (attachments.length > 0) {
+          reviewFiles();
+        } else {
+          draftPlan();
+        }
+      }
+
+      function reviewFiles() {
+        setStatus('Reviewing your attached files...', false, true);
+        document.getElementById('plan-btn').disabled = true;
+
+        callServer('classifyAttachments', [attachments], function (roles) {
+          applyRoles(roles);
+          renderRolesList();
+          document.getElementById('roles-box').style.display = 'block';
+          setStatus('', false, false);
+          document.getElementById('plan-btn').disabled = false;
+        }, function (err) {
+          setStatus('Error reviewing files: ' + err.message, true, false);
+          document.getElementById('plan-btn').disabled = false;
+        });
+      }
+
+      function cancelRoleReview() {
+        document.getElementById('roles-box').style.display = 'none';
+        setStatus('');
+      }
+
+      function confirmRolesAndDraftPlan() {
+        document.getElementById('roles-box').style.display = 'none';
+        draftPlan();
+      }
+
+      function draftPlan() {
         setStatus('Thinking through a plan...', false, true);
         document.getElementById('plan-btn').disabled = true;
 
