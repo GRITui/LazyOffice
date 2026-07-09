@@ -1,0 +1,19 @@
+{
+  "name": "lazyoffice-office-addin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LazyOffice as a Word/Excel/PowerPoint Add-in — describe what you need, review the plan, approve, and insert it directly into the open document.",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "sideload": "office-addin-debugging start manifest.xml"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "office-addin-dev-certs": "^1.13.0",
+    "pptxgenjs": "^3.12.0"
+  },
+  "devDependencies": {
+    "office-addin-debugging": "^5.1.9"
+  }
+}
