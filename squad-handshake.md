@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T09:00:00Z
+Last Updated: 2026-07-09T09:15:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -35,5 +35,9 @@ directly to prove the end-to-end flow first.
 * Resolved (2026-07-09): Owner confirmed the GAS Web App access model — sign-in required
   (any Google account), i.e. `access: ANYONE` in `appsscript.json`. Not domain-restricted,
   not anyone-with-link.
-* Still open: `Owner` to confirm the Milestone 1 stand-in choice (Claude via Anthropic API)
-  or override it.
+* Resolved (2026-07-09): Owner confirmed the Milestone 1 stand-in stays on the Claude API
+  (not swapping to another hosted LLM API as an interim step). `callClaude` in `Code.gs` is
+  annotated to be replaced by the self-hosted inference server (TSK-002), not by a different
+  hosted LLM API.
+
+All three outstanding Owner cross-squad requests are now resolved. No open blockers.

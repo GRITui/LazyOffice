@@ -8,8 +8,11 @@ function doGet(e) {
 }
 
 /**
- * Milestone 1 stand-in for the First Goal doc's 5-model pipeline. Replace
- * with a call to the self-hosted inference server once that milestone lands.
+ * Milestone 1 stand-in for the First Goal doc's 5-model pipeline. Owner
+ * confirmed (2026-07-09) staying on the Claude API for now rather than
+ * switching to another hosted LLM API as an intermediate step. Replace this
+ * function with a call to the self-hosted inference server (TSK-002) once
+ * that milestone lands — do not swap in a different hosted LLM API here.
  */
 function callClaude(systemPrompt, userPrompt) {
   var apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
