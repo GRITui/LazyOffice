@@ -7,6 +7,30 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+var LLM_PROVIDER_DEFAULT = 'claude'; // 'claude' | 'ollama'
+var OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
+var OLLAMA_MODEL_DEFAULT = 'llama3.1';
+
+/**
+ * Single entry point every stage calls instead of callClaude directly.
+ * Dispatches on the LLM_PROVIDER script property (defaults to "claude").
+ * Set it to "ollama" to point this prototype at a local Ollama server for
+ * iteration without an Anthropic API key — configure OLLAMA_URL/
+ * OLLAMA_MODEL script properties to match your setup. This does not change
+ * the default provider (owner confirmed 2026-07-09 staying on Claude); it's
+ * a local-only dev toggle, not a swap to another hosted LLM API. A deployed
+ * GAS Web App runs in Google's cloud and cannot reach "localhost" on your
+ * machine, so "ollama" mode only works when OLLAMA_URL is a reachable
+ * address (e.g. a tunnel), or when testing outside a real deployment.
+ */
+function callLLM(systemPrompt, userPrompt) {
+  var provider = PropertiesService.getScriptProperties().getProperty('LLM_PROVIDER') || LLM_PROVIDER_DEFAULT;
+  if (provider === 'ollama') {
+    return callOllama(systemPrompt, userPrompt);
+  }
+  return callClaude(systemPrompt, userPrompt);
+}
+
 /**
  * Milestone 1 stand-in for the First Goal doc's 5-model pipeline. Owner
  * confirmed (2026-07-09) staying on the Claude API for now rather than
@@ -48,6 +72,44 @@ function callClaude(systemPrompt, userPrompt) {
 }
 
 /**
+ * Local Ollama backend (OpenAI-compatible /v1/chat/completions), used only
+ * when the LLM_PROVIDER script property is set to "ollama". No API key
+ * required. See callLLM's comment for the localhost-reachability caveat.
+ */
+function callOllama(systemPrompt, userPrompt) {
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
+  var model = props.getProperty('OLLAMA_MODEL') || OLLAMA_MODEL_DEFAULT;
+
+  var payload = {
+    model: model,
+    max_tokens: 1024,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ]
+  };
+
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  var code = response.getResponseCode();
+  if (code !== 200) {
+    throw new Error('Ollama error ' + code + ': ' + response.getContentText());
+  }
+
+  var body = JSON.parse(response.getContentText());
+  if (!body.choices || !body.choices[0] || !body.choices[0].message) {
+    throw new Error('Unexpected Ollama response shape: ' + response.getContentText().slice(0, 300));
+  }
+  return body.choices[0].message.content;
+}
+
+/**
  * Stage 1 of the HITL flow: draft a short plain-language plan for the owner
  * to approve before anything is created in Drive.
  */
@@ -60,7 +122,7 @@ function getPlan(userRequest, attachments) {
     'structure/sections of an "output template" item, and match the tone and format of a ' +
     '"reference report/presentation" item. Plain sentences only — no code, XML, or markdown ' +
     'formatting.';
-  return callClaude(systemPrompt, userRequest + buildAttachmentContext(attachments));
+  return callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments));
 }
 
 /**
@@ -74,7 +136,7 @@ function generateDoc(userRequest, attachments) {
     'item), respond ONLY with a JSON object of the form ' +
     '{"title": string, "sections": [{"heading": string, "body": string}]}. ' +
     'No markdown, no code fences, no commentary — just the JSON object.';
-  var raw = callClaude(systemPrompt, userRequest + buildAttachmentContext(attachments));
+  var raw = callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments));
   var parsed = parseDocumentJson(raw);
 
   var doc = DocumentApp.create(parsed.title);
@@ -177,7 +239,7 @@ function classifyAttachments(attachments) {
     return descriptor;
   }).join('\n\n');
 
-  var raw = callClaude(systemPrompt, userPrompt);
+  var raw = callLLM(systemPrompt, userPrompt);
   return parseAttachmentRoles(raw, attachments);
 }
 
