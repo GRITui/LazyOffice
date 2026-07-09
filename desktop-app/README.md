@@ -13,7 +13,7 @@ that track.
 | UI ↔ backend | `google.script.run` | Electron IPC (`preload.js` → `main.js`) |
 | Output | Real Google Doc via `DocumentApp` | Local `.docx`/`.xlsx`/`.pptx` file (`~/Documents/LazyOffice/`) — no Google account needed |
 | Settings | Apps Script Script Properties (editor UI) | In-app Settings panel → local `config.json` in the OS user-data dir |
-| LLM backends | Claude API, or local Ollama (script properties) | Same: Claude API, or local Ollama (Settings panel) |
+| LLM backends | Claude API, or local Ollama (script properties) | **Local Ollama by default**; Claude API opt-in (Settings panel) |
 
 `engine.js` is a deliberate near-1:1 port of `Code.gs`'s LLM logic (same function names/
 shapes, same 5-model `OLLAMA_ROLE_MODELS` mapping from the First Goal doc) so the two stay
@@ -24,10 +24,36 @@ documents). Pick the output type in the UI; `docgen.js` writes a real `.docx` (`
 package), `.xlsx` (`xlsx`/SheetJS), or `.pptx` (`pptxgenjs`) accordingly — no
 `DocumentApp`/`SpreadsheetApp`/`SlidesApp` involved.
 
+## Local-first by default
+
+Out of the box the app runs entirely on a **local Ollama server** — no API key, nothing sent
+to the cloud (`LLM_PROVIDER` defaults to `ollama` in `engine.js`). To use a cloud model
+instead, open Settings, switch the provider to "Claude API", and enter a key (encrypted at
+rest — see below). The key is never sent to the cloud until you opt in.
+
+### First-run model setup
+
+On first launch, if the provider is the local default, the app checks the local Ollama server
+(`setup-llm.js`) and shows a one-time setup panel:
+
+- If Ollama **isn't running**, it points you to https://ollama.com/download and offers a
+  Recheck button (the Ollama runtime itself is a system component — the app never installs it
+  for you). You can also just switch to a cloud model in Settings.
+- If Ollama **is running**, it lists which of the five First Goal pipeline models
+  (`qwen3.5:9b`, `deepseek-r1:7b`, `phi4-mini:3.8b`, `granite4.1:8b`, `llama3.1:8b`) are
+  missing and downloads only those, streaming progress. **Models already on the device are
+  detected and kept** — it never re-downloads what you have. "Skip for now" dismisses the
+  panel; completion is remembered (`LLM_SETUP_DONE`).
+
+Uses Ollama's native HTTP API (`GET /api/tags`, `POST /api/pull`); the host is derived from
+the `OLLAMA_URL` setting (default `http://127.0.0.1:11434`).
+
 ## What's here
 
 - `main.js` — Electron main process: creates the window, wires IPC handlers for
-  `getPlan`/`classifyAttachments`/`generateOutput`/settings/`openInFinder`.
+  `getPlan`/`classifyAttachments`/`generateOutput`/settings/`openInFinder` and the first-run
+  `llmStatus`/`llmSetup` flow.
+- `setup-llm.js` — first-run local-model detection + pulling (Ollama HTTP API).
 - `preload.js` — exposes a `window.desktop` bridge to the renderer (contextIsolation on,
   nodeIntegration off).
 - `engine.js` — ported LLM logic (`callLLM`/`callClaude`/`callOllama`, attachment role

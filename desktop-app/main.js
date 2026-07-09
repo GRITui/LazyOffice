@@ -2,7 +2,12 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const engine = require('./engine');
 const docgen = require('./docgen');
+const setupLlm = require('./setup-llm');
 const { ScriptProperties } = require('./config-store');
+
+function ollamaHost() {
+  return setupLlm.hostFromOllamaUrl(ScriptProperties.getProperty('OLLAMA_URL') || '');
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -21,6 +26,36 @@ ipcMain.handle('lazyoffice:getPlan', (event, userRequest, attachments, outputTyp
 ipcMain.handle('lazyoffice:classifyAttachments', (event, attachments) => engine.classifyAttachments(attachments));
 ipcMain.handle('lazyoffice:generateOutput', (event, userRequest, attachments, outputType) => docgen.generateOutput(userRequest, attachments, outputType));
 ipcMain.handle('lazyoffice:openInFinder', (event, filePath) => shell.showItemInFolder(filePath));
+
+// --- First-run local-LLM setup ---
+// Report whether Ollama is up, what's installed, which required models are
+// missing, and whether the user has already completed/dismissed setup.
+ipcMain.handle('lazyoffice:llmStatus', async () => {
+  const st = await setupLlm.status(ollamaHost());
+  st.provider = ScriptProperties.getProperty('LLM_PROVIDER') || 'ollama';
+  st.setupDone = ScriptProperties.getProperty('LLM_SETUP_DONE') === 'true';
+  st.host = ollamaHost();
+  return st;
+});
+
+// Pull the missing required models, streaming progress to the renderer. Marks
+// setup done once everything the pipeline needs is present.
+ipcMain.handle('lazyoffice:llmSetup', async (event) => {
+  const wc = event.sender;
+  const host = ollamaHost();
+  const final = await setupLlm.ensureModels(
+    host,
+    (p) => { if (!wc.isDestroyed()) wc.send('lazyoffice:llmProgress', p); },
+    (m) => { if (!wc.isDestroyed()) wc.send('lazyoffice:llmModelDone', m); }
+  );
+  if (final.missing.length === 0) ScriptProperties.setProperty('LLM_SETUP_DONE', 'true');
+  return final;
+});
+
+// Let the user dismiss/skip first-run setup so it doesn't reappear.
+ipcMain.handle('lazyoffice:llmMarkDone', () => {
+  ScriptProperties.setProperty('LLM_SETUP_DONE', 'true');
+});
 
 const SETTINGS_KEYS = [
   'LLM_PROVIDER',

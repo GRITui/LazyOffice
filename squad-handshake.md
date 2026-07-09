@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T17:06:49Z
+Last Updated: 2026-07-09T17:24:35Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -67,6 +67,20 @@ been built — both tracks so far were implemented directly to prove the end-to-
   batch to one read/write, plaintext fallback now warns, and dead icon-drawing code was removed.
   Verified: 16-assertion headless config-store test + 9-assertion CDP Settings-flow test (incl.
   the no-clobber scenario) all pass.
+
+* `desktop-app/` local-first + first-run model setup (TSK-003, not yet committed): default
+  provider flipped to local Ollama (`engine.js` `LLM_PROVIDER_DEFAULT='ollama'`, renderer
+  fallbacks); cloud (Claude) stays opt-in via Settings. New `setup-llm.js` talks to Ollama's
+  native HTTP API (`/api/tags`, `/api/pull`) — on first run it detects which of the 5 pipeline
+  models are already installed and pulls ONLY the missing ones (never re-downloads), streaming
+  progress to a new first-run panel in the renderer; if Ollama isn't running it guides the user
+  to install it (the runtime itself is never auto-installed). Completion is remembered
+  (`LLM_SETUP_DONE`). Secret scan of the repo came back clean (no keys committed); added
+  defensive `.gitignore` (`config.json`, `*.env`, `*.log`). Caught + fixed a packaging bug:
+  `setup-llm.js` was missing from `build.files`, so the packaged app.asar omitted it and the
+  window failed to open — added it and re-verified the packaged app launches. Verified:
+  14-assertion setup-llm unit test + 7-assertion first-run CDP test (against a fake Ollama),
+  passing on BOTH the dev binary and the packaged `.app`.
 
 ## Blockers & QA Failures
 

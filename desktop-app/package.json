@@ -21,6 +21,7 @@
       "engine.js",
       "docgen.js",
       "config-store.js",
+      "setup-llm.js",
       "renderer/**"
     ],
     "mac": {
