@@ -38,7 +38,22 @@ iterating without an Anthropic API key. Set these script properties instead of
 - `LLM_PROVIDER` = `ollama`
 - `OLLAMA_URL` = your server's OpenAI-compatible chat endpoint, e.g.
   `http://localhost:11434/v1/chat/completions` (Ollama's default)
-- `OLLAMA_MODEL` = the model name you have pulled locally, e.g. `llama3.1`
+
+Then pull and configure the model(s) you want. Milestone 1 today only calls 3 of the First
+Goal doc's 5 pipeline roles — set at least those. All 5 are listed here (with real, verified
+Ollama tags) so a local setup has everything ready once TSK-002 wires up the remaining two:
+
+| Role | Model (First Goal doc) | `ollama pull` | Script property | Called by (Milestone 1) |
+| --- | --- | --- | --- | --- |
+| Orchestrator | Qwen3.5-9B | `ollama pull qwen3.5:9b` | `OLLAMA_ORCHESTRATOR_MODEL` | `getPlan` |
+| Planner | DeepSeek-R1-Distill-Qwen-7B | `ollama pull deepseek-r1:7b` | `OLLAMA_PLANNER_MODEL` | `classifyAttachments` |
+| Syntax Enforcer | Phi-4-mini (3.8B) | `ollama pull phi4-mini:3.8b` | `OLLAMA_SYNTAX_MODEL` | *(not yet — TSK-002)* |
+| Code Engine | IBM Granite 4.1 8B | `ollama pull granite4.1:8b` | `OLLAMA_CODE_ENGINE_MODEL` | `generateDoc` |
+| Generalist | Llama 3.1 8B Instruct | `ollama pull llama3.1:8b` | `OLLAMA_GENERALIST_MODEL` | *(not yet — TSK-002)* |
+
+Each `OLLAMA_*_MODEL` property is optional — if unset, that role falls back to the tag shown
+above, then to the legacy `OLLAMA_MODEL` property (single model for everything) if you'd
+rather not configure per-role models yet.
 
 **Reachability caveat:** a deployed GAS Web App runs in Google's cloud, not on your machine
 — it cannot reach `http://localhost:...` directly. To actually use this from a real

@@ -9,24 +9,44 @@ function doGet(e) {
 
 var LLM_PROVIDER_DEFAULT = 'claude'; // 'claude' | 'ollama'
 var OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
-var OLLAMA_MODEL_DEFAULT = 'llama3.1';
+var OLLAMA_MODEL_DEFAULT = 'llama3.1:8b';
+
+/**
+ * The First Goal doc's 5-agent pipeline
+ * (docs.google.com/document/d/1uwIf6bRwaxKr2qdgNLjm2XJdV1aszLcSbED252N8uXQ), mapped to a
+ * script property (so each role's local model is independently configurable) and a default
+ * Ollama tag (verified against the Ollama library). Milestone 1 only calls 3 of the 5 roles
+ * today — orchestrator (getPlan), planner (classifyAttachments), code_engine (generateDoc) —
+ * since the full sequential relay is TSK-002. syntax_enforcer and generalist have no call
+ * site yet; their models are configured here so a local Ollama setup already has all 5
+ * pulled and ready once TSK-002 wires up the remaining stages.
+ */
+var OLLAMA_ROLE_MODELS = {
+  orchestrator: { property: 'OLLAMA_ORCHESTRATOR_MODEL', label: 'Qwen3.5-9B', ollamaTag: 'qwen3.5:9b' },
+  planner: { property: 'OLLAMA_PLANNER_MODEL', label: 'DeepSeek-R1-Distill-Qwen-7B', ollamaTag: 'deepseek-r1:7b' },
+  syntax_enforcer: { property: 'OLLAMA_SYNTAX_MODEL', label: 'Phi-4-mini (3.8B)', ollamaTag: 'phi4-mini:3.8b' },
+  code_engine: { property: 'OLLAMA_CODE_ENGINE_MODEL', label: 'IBM Granite 4.1 8B', ollamaTag: 'granite4.1:8b' },
+  generalist: { property: 'OLLAMA_GENERALIST_MODEL', label: 'Llama 3.1 8B Instruct', ollamaTag: 'llama3.1:8b' }
+};
 
 /**
  * Single entry point every stage calls instead of callClaude directly.
- * Dispatches on the LLM_PROVIDER script property (defaults to "claude").
- * Set it to "ollama" to point this prototype at a local Ollama server for
- * iteration without an Anthropic API key — configure OLLAMA_URL/
- * OLLAMA_MODEL script properties to match your setup. This does not change
- * the default provider (owner confirmed 2026-07-09 staying on Claude); it's
- * a local-only dev toggle, not a swap to another hosted LLM API. A deployed
- * GAS Web App runs in Google's cloud and cannot reach "localhost" on your
- * machine, so "ollama" mode only works when OLLAMA_URL is a reachable
+ * Dispatches on the LLM_PROVIDER script property (defaults to "claude"). Set it to "ollama"
+ * to point this prototype at a local Ollama server for iteration without an Anthropic API
+ * key — configure OLLAMA_URL plus the per-role OLLAMA_*_MODEL properties (see
+ * OLLAMA_ROLE_MODELS) to match your setup. This does not change the default provider (owner
+ * confirmed 2026-07-09 staying on Claude); it's a local-only dev toggle, not a swap to
+ * another hosted LLM API. A deployed GAS Web App runs in Google's cloud and cannot reach
+ * "localhost" on your machine, so "ollama" mode only works when OLLAMA_URL is a reachable
  * address (e.g. a tunnel), or when testing outside a real deployment.
+ *
+ * `role` should be one of OLLAMA_ROLE_MODELS's keys (orchestrator/planner/syntax_enforcer/
+ * code_engine/generalist); it's ignored by the Claude path, which uses a single model.
  */
-function callLLM(systemPrompt, userPrompt) {
+function callLLM(systemPrompt, userPrompt, role) {
   var provider = PropertiesService.getScriptProperties().getProperty('LLM_PROVIDER') || LLM_PROVIDER_DEFAULT;
   if (provider === 'ollama') {
-    return callOllama(systemPrompt, userPrompt);
+    return callOllama(systemPrompt, userPrompt, role);
   }
   return callClaude(systemPrompt, userPrompt);
 }
@@ -75,11 +95,21 @@ function callClaude(systemPrompt, userPrompt) {
  * Local Ollama backend (OpenAI-compatible /v1/chat/completions), used only
  * when the LLM_PROVIDER script property is set to "ollama". No API key
  * required. See callLLM's comment for the localhost-reachability caveat.
+ *
+ * Model resolution order: the role's own script property (e.g.
+ * OLLAMA_ORCHESTRATOR_MODEL) → that role's default Ollama tag in
+ * OLLAMA_ROLE_MODELS → the legacy single OLLAMA_MODEL property → its default.
+ * The legacy fallback lets a caller with no role, or a role missing from
+ * OLLAMA_ROLE_MODELS, still work off one general-purpose model.
  */
-function callOllama(systemPrompt, userPrompt) {
+function callOllama(systemPrompt, userPrompt, role) {
   var props = PropertiesService.getScriptProperties();
   var url = props.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
-  var model = props.getProperty('OLLAMA_MODEL') || OLLAMA_MODEL_DEFAULT;
+  var roleConfig = OLLAMA_ROLE_MODELS[role];
+  var model = (roleConfig && props.getProperty(roleConfig.property)) ||
+    (roleConfig && roleConfig.ollamaTag) ||
+    props.getProperty('OLLAMA_MODEL') ||
+    OLLAMA_MODEL_DEFAULT;
 
   var payload = {
     model: model,
@@ -122,7 +152,7 @@ function getPlan(userRequest, attachments) {
     'structure/sections of an "output template" item, and match the tone and format of a ' +
     '"reference report/presentation" item. Plain sentences only — no code, XML, or markdown ' +
     'formatting.';
-  return callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments));
+  return callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'orchestrator');
 }
 
 /**
@@ -136,7 +166,7 @@ function generateDoc(userRequest, attachments) {
     'item), respond ONLY with a JSON object of the form ' +
     '{"title": string, "sections": [{"heading": string, "body": string}]}. ' +
     'No markdown, no code fences, no commentary — just the JSON object.';
-  var raw = callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments));
+  var raw = callLLM(systemPrompt, userRequest + buildAttachmentContext(attachments), 'code_engine');
   var parsed = parseDocumentJson(raw);
 
   var doc = DocumentApp.create(parsed.title);
@@ -239,7 +269,7 @@ function classifyAttachments(attachments) {
     return descriptor;
   }).join('\n\n');
 
-  var raw = callLLM(systemPrompt, userPrompt);
+  var raw = callLLM(systemPrompt, userPrompt, 'planner');
   return parseAttachmentRoles(raw, attachments);
 }
 
