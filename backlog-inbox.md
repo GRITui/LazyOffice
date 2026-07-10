@@ -23,6 +23,16 @@ Do not edit outside the XML tags. PM Agents must only parse items marked READY_F
 </task_item>
 
 <task_item>
+  <id>TSK-004</id>
+  <source>OWNER_POPUP</source>
+  <status>DONE</status>
+  <priority>MEDIUM</priority>
+  <title>Add a runnable squad-harness validation tool to the repo</title>
+  <description>Turn the 2026-07-10 ad-hoc validation run (fail-soft parsing test) into permanent tooling: tools/validate-harness.js exporting a fail-soft backlog parser per the CLAUDE.md crash-proofing convention (block-scoped tag matching, skip malformed entries with logged warnings, never throw on bad input), plus tools/validate-harness.test.js covering: unclosed-tag entry skipped without corrupting siblings, tag-bounded noise block skipped, stray prose outside tags ignored, well-formed entries extracted with all fields, and READY_FOR_PM gating. Acceptance: `node tools/validate-harness.test.js` exits 0; parser never throws regardless of input. No new dependencies.</description>
+  <researcher_notes>Feasible: plain Node (v22 in env), no deps, no GAS runtime needed. Serves the harness-packaging idea by making the crash-proofing convention executable and regression-testable instead of prose-only. Owner approved running one real task end-to-end through the squad loop (2026-07-10).</researcher_notes>
+</task_item>
+
+<task_item>
   <id>TSK-003</id>
   <source>OWNER_POPUP</source>
   <status>IN_PROGRESS</status>
