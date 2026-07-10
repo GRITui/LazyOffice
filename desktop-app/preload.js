@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('desktop', {
   openInFinder: (filePath) => ipcRenderer.invoke('lazyoffice:openInFinder', filePath),
   getSettings: () => ipcRenderer.invoke('lazyoffice:getSettings'),
   setSettings: (settings) => ipcRenderer.invoke('lazyoffice:setSettings', settings),
+  getRoleCatalog: () => ipcRenderer.invoke('lazyoffice:getRoleCatalog'),
   // First-run local-LLM setup
   llmStatus: () => ipcRenderer.invoke('lazyoffice:llmStatus'),
   llmSetup: () => ipcRenderer.invoke('lazyoffice:llmSetup'),
