@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T21:15:00Z
+Last Updated: 2026-07-10T15:10:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -8,6 +8,19 @@ Last Updated: 2026-07-09T21:15:00Z
   <active_task_id>TSK-003</active_task_id>
   <sprint_completion_percentage>100</sprint_completion_percentage>
 </squad_metadata>
+
+## Branch note
+
+This copy of `squad-handshake.md` lives on **`mac-arm64-local-llm`**, branched from
+`claude/quick-update-1z30aj`'s tip (commit `ba64fbf`) with no code changes at the fork point —
+its content is currently identical to that branch's `desktop-app/`. Purpose: give TSK-003 (the
+Electron app running fully on local Ollama, one model, `llama3.1:8b`, with the Claude CLI as its
+only opt-in cloud backend) its own dedicated branch to keep developing on, separate from
+`claude/quick-update-1z30aj` (which still also carries the paused `apps-script/` webapp) and
+separate from the two higher-risk/different-architecture forks (`claude/office-plugin`'s Office
+Add-in, `Mac-claude-cloud-desktop`'s Claude-Desktop-via-CDP track). Future `desktop-app/` work
+should land here; check `claude/quick-update-1z30aj`'s copy of this file if reconciling history
+later.
 
 ## Current Focus
 
