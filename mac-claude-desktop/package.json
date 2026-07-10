@@ -1,0 +1,45 @@
+{
+  "name": "lazyoffice-mac-claude-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LazyOffice, driven by the user's own Claude Desktop app via CDP instead of an API key or a local model — chat a request, review the plan, approve, get a local document, spreadsheet, or presentation file.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.lazyoffice.macclaudedesktop",
+    "productName": "LazyOffice",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "engine.js",
+      "docgen.js",
+      "config-store.js",
+      "renderer/**"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
+  },
+  "dependencies": {
+    "docx": "^9.0.0",
+    "pptxgenjs": "^3.12.0",
+    "xlsx": "^0.18.5",
+    "playwright-core": "^1.48.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}

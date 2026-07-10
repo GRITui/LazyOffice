@@ -1,13 +1,23 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T21:15:00Z
+Last Updated: 2026-07-10T14:40:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
   <current_status>EXECUTING</current_status>
-  <active_task_id>TSK-003</active_task_id>
+  <active_task_id>TSK-004</active_task_id>
   <sprint_completion_percentage>100</sprint_completion_percentage>
 </squad_metadata>
+
+## Branch note
+
+This copy of `squad-handshake.md` lives on **`Mac-claude-cloud-desktop`**, forked from
+`claude/quick-update-1z30aj`'s tip (commit `ba64fbf`). TSK-003 (`desktop-app/`) commits after
+the fork point won't appear here automatically — check `claude/quick-update-1z30aj`'s copy of
+this file for TSK-003's latest status, and reconcile both copies when/if the branches merge
+back together. This branch adds TSK-004 (`mac-claude-desktop/`), forked to its own branch for
+the same reason `claude/office-plugin` was: a distinct, higher-risk architecture, not an
+incremental addition to `desktop-app/`.
 
 ## Current Focus
 
@@ -144,6 +154,32 @@ been built — both tracks so far were implemented directly to prove the end-to-
     Ollama even with the backend set to `claude-cli`. **Never run against a real installed
     `claude` CLI** — flagged in `desktop-app/README.md` as framework-stage, not finished.
 
+* `mac-claude-desktop/` scaffold (TSK-004, `Mac-claude-cloud-desktop`, not yet merged): a fourth
+  track, forked to its own branch. Before writing any code, researched whether Claude Desktop
+  can be driven programmatically at all (WebSearch + reading a third-party PoC project) rather
+  than assuming — there is no supported API/CLI for it. Presented the Owner two real options:
+  (a) MCP, where Claude Desktop becomes the chat UI and LazyOffice is the tool it calls, one-
+  click installable as a `.mcpb` Desktop Extension; (b) CDP/UI-automation, where LazyOffice keeps
+  its own chat/plan/approve window and silently drives Claude Desktop's DOM behind it. Flagged
+  (b) as fragile and gray-area before the Owner chose it, explicitly keeping LazyOffice's own UI.
+  Reused `desktop-app/`'s `docgen.js` (writers), `renderer/index.html` (chat/plan/clarify/
+  preview/result cards), `main.js`/`preload.js` shape unmodified — the only new file is
+  `engine.js`, which has a single `callLLM` implemented via `playwright-core`'s
+  `connectOverCDP`: start a new Claude Desktop conversation per call, type
+  systemPrompt+userPrompt as one combined message (no separate system-prompt field exists in
+  the chat UI), click Send, poll `div.font-claude-message` for a response that stops changing
+  across two consecutive 1s polls. Settings holds only a CDP host/port; the old first-run
+  Ollama-model-download panel was replaced with a Claude Desktop connection-status panel that
+  shows the exact `--remote-debugging-port` launch command when unreachable.
+  Verified against a stand-in only: a real Chromium window (not a mock) launched with
+  `--remote-debugging-port`, showing a fake page with the same DOM shape and revealing canned
+  responses gradually to exercise the stability-polling logic honestly — confirmed
+  `checkStatus`, the clarification loop across two rounds, attachment classification, and
+  `buildContent`/`createOutput` producing a real `.docx` all work through the CDP path.
+  **Never run against a real Claude Desktop app** — every CSS selector is inferred from a
+  third-party proof-of-concept, not from Anthropic, and may not match the real app at all. See
+  `mac-claude-desktop/README.md` for the full risk writeup.
+
 ## Blockers & QA Failures
 
 * RESOLVED (2026-07-09): TSK-003 now runs in a real Electron window. `npm start` and the
@@ -173,6 +209,15 @@ been built — both tracks so far were implemented directly to prove the end-to-
 * Same caveat again for the single-model collapse + Claude CLI framework directly below that:
   the CLI wiring was verified against a fake `claude` binary (exact argv shape, JSON-result
   parsing, non-zero-exit and ENOENT error paths), never against a real installed CLI.
+* TSK-004 (`mac-claude-desktop/`): highest-risk track so far. Every CDP selector
+  (`div[contenteditable="true"]`, `button[aria-label*="Send"]`, `div.font-claude-message`) is
+  inferred from a third-party PoC, not documented by Anthropic, and could already be wrong
+  against the real Claude Desktop app — this sandbox has no macOS/real Claude Desktop to check
+  against. Also unverified: the "New chat" button selector, and how `getClaudeDesktopPage` finds
+  the right window among CDP targets when more than one exists. Needs real debugging against the
+  actual app before this is anything more than a proof of the mechanism. Automating a consumer
+  chat product's UI to answer programmatic requests is gray-area against the product's intended
+  use — flagged to the Owner before building, who chose to proceed anyway.
 
 ## Cross-Squad Requests
 
