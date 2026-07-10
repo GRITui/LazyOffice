@@ -1,23 +1,17 @@
-// First-run local-LLM setup. LazyOffice is local-first (see engine.js):
-// every local call — the pipeline and the always-local prompt auditor alike
-// — runs on one verified model, engine.js's OLLAMA_MODEL. This module
-// detects whether it's already installed and pulls it if not; it never
-// blindly re-downloads, and it never installs the Ollama runtime itself
-// (that's a system component; if it's absent the UI guides the user to it).
+// First-run local-LLM setup. Purely mechanical Ollama HTTP operations —
+// it has no opinion of its own about which models are required; the caller
+// (main.js) computes that list from engine.js's per-role backend config
+// (only roles currently set to the 'ollama' backend type need a pull) and
+// passes it in. This module detects what's already installed and pulls only
+// what's missing; it never blindly re-downloads, and it never installs the
+// Ollama runtime itself (that's a system component; if it's absent the UI
+// guides the user to it).
 //
 // Uses Ollama's native HTTP API (default 127.0.0.1:11434):
 //   GET  /api/tags  -> installed models
 //   POST /api/pull  -> streamed NDJSON download progress
 const http = require('http');
 const { URL } = require('url');
-
-// Same tag as engine.js's OLLAMA_MODEL — the only model this app needs
-// locally. Kept as an array of {tag, role} (rather than a bare string) so
-// the rest of this module's shape didn't need to change from when it
-// tracked several required models.
-const REQUIRED_MODELS = [
-  { tag: 'llama3.1:8b', role: 'Local model' }
-];
 
 const DEFAULT_HOST = 'http://127.0.0.1:11434';
 
@@ -66,25 +60,28 @@ async function isOllamaUp(host) {
   try { await getInstalledModels(host); return true; } catch (err) { return false; }
 }
 
-function computeMissing(installed) {
+function computeMissing(installed, requiredModels) {
   const have = {};
   installed.forEach((name) => { have[normalizeTag(name)] = true; });
-  return REQUIRED_MODELS.filter((m) => !have[normalizeTag(m.tag)]);
+  return (requiredModels || []).filter((m) => !have[normalizeTag(m.tag)]);
 }
 
-// A snapshot the UI uses to decide what to show on first run.
-async function status(host) {
+// A snapshot the UI uses to decide what to show on first run. requiredModels
+// is an array of {tag, role} — the roles currently configured to use the
+// 'ollama' backend, deduped by tag, computed by the caller.
+async function status(host, requiredModels) {
+  const required = requiredModels || [];
   const up = await isOllamaUp(host);
   if (!up) {
-    return { ollamaUp: false, installed: [], missing: REQUIRED_MODELS.slice(), hasAnyLlm: false, required: REQUIRED_MODELS.length };
+    return { ollamaUp: false, installed: [], missing: required.slice(), hasAnyLlm: false, required: required.length };
   }
   const installed = await getInstalledModels(host);
   return {
     ollamaUp: true,
     installed: installed,
-    missing: computeMissing(installed),
+    missing: computeMissing(installed, required),
     hasAnyLlm: installed.length > 0,
-    required: REQUIRED_MODELS.length
+    required: required.length
   };
 }
 
@@ -139,19 +136,18 @@ function pullModel(host, tag, onProgress) {
 // Pull every missing required model in order. onProgress streams per-line
 // progress; onModelDone fires after each model completes. Returns a fresh
 // status() when finished.
-async function ensureModels(host, onProgress, onModelDone) {
-  const st = await status(host);
+async function ensureModels(host, requiredModels, onProgress, onModelDone) {
+  const st = await status(host, requiredModels);
   if (!st.ollamaUp) throw new Error('Ollama is not reachable at ' + host + '. Install/start Ollama first.');
   for (let i = 0; i < st.missing.length; i++) {
     const m = st.missing[i];
     await pullModel(host, m.tag, onProgress);
     if (onModelDone) onModelDone(m);
   }
-  return status(host);
+  return status(host, requiredModels);
 }
 
 module.exports = {
-  REQUIRED_MODELS,
   DEFAULT_HOST,
   hostFromOllamaUrl,
   normalizeTag,

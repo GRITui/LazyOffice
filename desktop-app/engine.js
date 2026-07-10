@@ -12,26 +12,74 @@ const { ScriptProperties } = require('./config-store');
 const { spawn } = require('child_process');
 const os = require('os');
 
-// Local-first, and now local-only-by-default-model: verified that the whole
-// pipeline works on a single local model, so there is exactly one Ollama
-// model in this codebase — no per-role choice, no tick boxes, no fallback
-// chain. 'ollama' | 'claude-cli'.
-const LLM_PROVIDER_DEFAULT = 'ollama';
-const OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
-const OLLAMA_MODEL = 'llama3.1:8b'; // Llama 3.1 8B Instruct — the only local model this app uses.
+// All 5 First Goal doc roles, restored after being collapsed to a single
+// model — each is now independently wireable to any backend (Ollama with
+// any tag, the Claude CLI, or a generic OpenAI-compatible endpoint), not
+// just a different Ollama model tag within one fixed backend. These are the
+// DEFAULTS only — see resolveRoleConfig, which layers the user's own
+// Settings (ROLE_BACKEND_CONFIG) on top, role by role.
+const ROLE_DEFAULTS = {
+  orchestrator: { roleLabel: 'Orchestrator', type: 'ollama', model: 'qwen3.5:9b' },
+  planner: { roleLabel: 'Planner', type: 'ollama', model: 'deepseek-r1:7b' },
+  syntax_enforcer: { roleLabel: 'Syntax Enforcer', type: 'ollama', model: 'phi4-mini:3.8b' },
+  code_engine: { roleLabel: 'Code Engine', type: 'ollama', model: 'granite4.1:8b' },
+  generalist: { roleLabel: 'Generalist', type: 'ollama', model: 'llama3.1:8b' }
+};
 
-async function callLLM(systemPrompt, userPrompt) {
-  const provider = ScriptProperties.getProperty('LLM_PROVIDER') || LLM_PROVIDER_DEFAULT;
-  if (provider === 'claude-cli') {
-    return callClaudeCli(systemPrompt, userPrompt);
+const BACKEND_TYPES = [
+  { value: 'ollama', label: 'Ollama (local)' },
+  { value: 'claude-cli', label: 'Claude CLI' },
+  { value: 'openai-compatible', label: 'Custom (OpenAI-compatible endpoint)' }
+];
+
+const OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
+const CLAUDE_CLI_BIN_DEFAULT = 'claude';
+const CLAUDE_CLI_MODEL_DEFAULT = 'claude-sonnet-5';
+const CLAUDE_CLI_TIMEOUT_MS = 120000;
+
+// Layers Settings' per-role overrides on top of that role's defaults. A role
+// with no stored config at all (or a stored config missing a `type`) falls
+// back entirely to ROLE_DEFAULTS — so a fresh install behaves exactly like
+// the First Goal doc's original mapping without the user configuring
+// anything. A role using the 'ollama' backend without its own `url`
+// override picks up the shared OLLAMA_URL setting (one server address for
+// most roles, rather than re-entering the same URL five times), falling
+// back to OLLAMA_URL_DEFAULT if that isn't set either.
+function resolveRoleConfig(role) {
+  const stored = ScriptProperties.getProperty('ROLE_BACKEND_CONFIG') || {};
+  const fallback = ROLE_DEFAULTS[role] || ROLE_DEFAULTS.generalist;
+  const roleStored = stored[role];
+  const merged = (!roleStored || !roleStored.type) ? Object.assign({}, fallback) : Object.assign({}, fallback, roleStored);
+  if (merged.type === 'ollama' && !merged.url) {
+    merged.url = ScriptProperties.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
   }
-  return callOllama(systemPrompt, userPrompt);
+  return merged;
 }
 
-async function callOllama(systemPrompt, userPrompt) {
-  const url = ScriptProperties.getProperty('OLLAMA_URL') || OLLAMA_URL_DEFAULT;
+// Every role currently resolved to the 'ollama' backend, deduped by tag —
+// the list setup-llm.js needs to know what to check/pull on first run. Roles
+// pointed at claude-cli or a custom endpoint need nothing downloaded.
+function computeOllamaRequiredModels() {
+  const seen = {};
+  const result = [];
+  Object.keys(ROLE_DEFAULTS).forEach((role) => {
+    const config = resolveRoleConfig(role);
+    if (config.type !== 'ollama' || !config.model || seen[config.model]) return;
+    seen[config.model] = true;
+    result.push({ tag: config.model, role: ROLE_DEFAULTS[role].roleLabel });
+  });
+  return result;
+}
+
+// Both Ollama and a generic OpenAI-compatible endpoint speak the same
+// request/response shape (POST {model, messages} -> {choices[0].message}),
+// so one function serves both backend types — they differ only in default
+// URL and whether an API key header is sent.
+async function callOpenAiStyle(url, model, apiKey, systemPrompt, userPrompt) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers.Authorization = 'Bearer ' + apiKey;
   const payload = {
-    model: OLLAMA_MODEL,
+    model: model,
     max_tokens: 1024,
     messages: [
       { role: 'system', content: systemPrompt },
@@ -39,41 +87,18 @@ async function callOllama(systemPrompt, userPrompt) {
     ]
   };
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
+  const response = await fetch(url, { method: 'POST', headers: headers, body: JSON.stringify(payload) });
   const text = await response.text();
   if (response.status !== 200) {
-    throw new Error('Ollama error ' + response.status + ' for model "' + OLLAMA_MODEL + '": ' + text);
+    throw new Error('Backend error ' + response.status + ' for model "' + model + '" at ' + url + ': ' + text);
   }
 
   const body = JSON.parse(text);
   if (!body.choices || !body.choices[0] || !body.choices[0].message) {
-    throw new Error('Unexpected Ollama response shape for model "' + OLLAMA_MODEL + '": ' + text.slice(0, 300));
+    throw new Error('Unexpected response shape from ' + url + ': ' + text.slice(0, 300));
   }
   return body.choices[0].message.content;
 }
-
-// Always local, always OLLAMA_MODEL. getPlan calls this directly rather than
-// going through callLLM's provider switch: the "what does the user actually
-// need" step should stay fast, free, and available even when LLM_PROVIDER is
-// pointed at claude-cli for the backend that does the actual drafting.
-async function callPromptAuditor(systemPrompt, userPrompt) {
-  try {
-    return await callOllama(systemPrompt, userPrompt);
-  } catch (err) {
-    throw new Error('Prompt auditor (local ' + OLLAMA_MODEL + ') is unreachable. This step always ' +
-      'runs locally regardless of your provider setting — install/start Ollama and pull ' +
-      OLLAMA_MODEL + ', then try again. (' + err.message + ')');
-  }
-}
-
-const CLAUDE_CLI_BIN_DEFAULT = 'claude';
-const CLAUDE_CLI_MODEL_DEFAULT = 'claude-sonnet-5';
-const CLAUDE_CLI_TIMEOUT_MS = 120000;
 
 /**
  * Shells out to a locally-installed Claude Code CLI as a one-shot text
@@ -93,9 +118,9 @@ const CLAUDE_CLI_TIMEOUT_MS = 120000;
  * response can be parsed from the "result" field rather than scraped from
  * mixed stdout.
  */
-function callClaudeCli(systemPrompt, userPrompt) {
-  const bin = ScriptProperties.getProperty('CLAUDE_CLI_PATH') || CLAUDE_CLI_BIN_DEFAULT;
-  const model = ScriptProperties.getProperty('CLAUDE_CLI_MODEL') || CLAUDE_CLI_MODEL_DEFAULT;
+function callClaudeCliProcess(config, systemPrompt, userPrompt) {
+  const bin = config.path || CLAUDE_CLI_BIN_DEFAULT;
+  const model = config.model || CLAUDE_CLI_MODEL_DEFAULT;
   const args = [
     '--bare',
     '-p', userPrompt,
@@ -149,6 +174,36 @@ function callClaudeCli(systemPrompt, userPrompt) {
       resolve(parsed.result);
     });
   });
+}
+
+function callBackend(config, systemPrompt, userPrompt) {
+  if (config.type === 'claude-cli') {
+    return callClaudeCliProcess(config, systemPrompt, userPrompt);
+  }
+  if (config.type === 'openai-compatible') {
+    if (!config.url) throw new Error('No endpoint URL configured for this role\'s custom backend.');
+    return callOpenAiStyle(config.url, config.model || 'default', config.apiKey, systemPrompt, userPrompt);
+  }
+  // default: ollama
+  return callOpenAiStyle(config.url || OLLAMA_URL_DEFAULT, config.model, null, systemPrompt, userPrompt);
+}
+
+/**
+ * The single LLM entry point every call site uses, always naming which of
+ * the 5 First Goal doc roles it's calling for. Each role resolves to its own
+ * backend independently (see resolveRoleConfig) — unlike the single-model
+ * era, there is no longer one global provider switch, and no special-cased
+ * "always local" bypass for the Orchestrator: it's just another role with
+ * its own configurable backend now.
+ */
+async function callRole(role, systemPrompt, userPrompt) {
+  const config = resolveRoleConfig(role);
+  try {
+    return await callBackend(config, systemPrompt, userPrompt);
+  } catch (err) {
+    const label = (ROLE_DEFAULTS[role] || {}).roleLabel || role;
+    throw new Error(label + ' (' + config.type + (config.model ? ': ' + config.model : '') + ') failed: ' + err.message);
+  }
 }
 
 const MAX_INLINE_TEXT_CHARS = 4000;
@@ -225,7 +280,7 @@ async function classifyAttachments(attachments) {
     return descriptor;
   }).join('\n\n');
 
-  const raw = await callLLM(systemPrompt, userPrompt);
+  const raw = await callRole('planner', systemPrompt, userPrompt);
   return parseAttachmentRoles(raw, attachments);
 }
 
@@ -270,7 +325,7 @@ function extractJson(text) {
 }
 
 // Circuit breaker on the clarification loop, mirroring the Squad Setup doc's
-// 3-strikes convention: after this many rounds the prompt auditor is told to
+// 3-strikes convention: after this many rounds the Orchestrator is told to
 // stop asking and just draft its best plan, so a request it keeps finding
 // "unclear" can never trap the user in an endless Q&A loop.
 const MAX_CLARIFICATION_ROUNDS = 3;
@@ -283,28 +338,25 @@ function buildClarificationContext(clarifications) {
 }
 
 /**
- * Stage 1 of the HITL flow — the prompt auditor (see callPromptAuditor;
- * always local Llama 3.1 8B Instruct, never the configured backend
- * provider). Before drafting a plan, it first judges whether the
+ * Stage 1 of the HITL flow — the Orchestrator role, restored to being a
+ * regular independently-configurable role like the other 4 (see
+ * ROLE_DEFAULTS). Before drafting a plan, it first judges whether the
  * request has enough detail to plan confidently for the chosen output type —
  * if not, it asks a short list of clarifying questions instead of guessing.
  * The renderer collects the user's answers and calls this again with the
  * growing `clarifications` history; that repeats until it returns a plan, or
  * MAX_CLARIFICATION_ROUNDS is hit and it's told to stop asking and draft its
- * best plan with reasonable assumptions. Only once this resolves to "ready"
- * does the request go on to handshake with the backend pipeline (buildContent
- * in docgen.js) that actually drafts the output — that stage still runs on
- * whatever provider/model the user has configured.
+ * best plan with reasonable assumptions.
  * Resolves to { status: 'ready', plan } or
  * { status: 'needs_clarification', questions: [...] }.
  */
 async function getPlan(userRequest, attachments, outputType, clarifications) {
   const describe = OUTPUT_TYPE_COPY[outputType] || OUTPUT_TYPE_COPY.document;
   const forceReady = (clarifications || []).length >= MAX_CLARIFICATION_ROUNDS;
-  const systemPrompt = 'You are the prompt auditor for an office document generator: your job ' +
-    'is to pin down exactly what the user needs before it is handed off to the system that ' +
-    'drafts the output. Given a user\'s request and any reference material, first judge ' +
-    'whether you have enough detail to confidently plan ' + describe + '. ' +
+  const systemPrompt = 'You are the Orchestrator for an office document generator: your job is ' +
+    'to pin down exactly what the user needs before it is handed off to the roles that draft ' +
+    'the output. Given a user\'s request and any reference material, first judge whether you ' +
+    'have enough detail to confidently plan ' + describe + '. ' +
     (forceReady
       ? 'You have already asked enough clarifying questions for this request — draft your best ' +
         'plan now using reasonable assumptions for anything still unclear. Do not ask further ' +
@@ -322,7 +374,7 @@ async function getPlan(userRequest, attachments, outputType, clarifications) {
     '"questions": [string, ...]}. No markdown, no code fences, no commentary — just the JSON ' +
     'object.';
   const userPrompt = userRequest + buildAttachmentContext(attachments) + buildClarificationContext(clarifications);
-  const raw = await callPromptAuditor(systemPrompt, userPrompt);
+  const raw = await callRole('orchestrator', systemPrompt, userPrompt);
   const parsed = extractJson(raw);
 
   if (parsed && parsed.status === 'needs_clarification' && Array.isArray(parsed.questions) &&
@@ -339,13 +391,13 @@ async function getPlan(userRequest, attachments, outputType, clarifications) {
 }
 
 module.exports = {
-  callLLM,
-  callOllama,
-  callClaudeCli,
-  callPromptAuditor,
+  callRole,
   buildAttachmentContext,
   classifyAttachments,
   parseAttachmentRoles,
   getPlan,
-  OLLAMA_MODEL
+  ROLE_DEFAULTS,
+  BACKEND_TYPES,
+  resolveRoleConfig,
+  computeOllamaRequiredModels
 };

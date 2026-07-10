@@ -250,6 +250,16 @@
       }
       .settings-hint { font-size: 12px; color: var(--text-muted); margin: 2px 0 0; }
       .settings-hint code { font-family: ui-monospace, "SF Mono", "Roboto Mono", monospace; }
+      .role-backend {
+        border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px;
+        margin-top: 10px;
+      }
+      .role-backend legend {
+        font-size: 12px; font-weight: 700; color: var(--text); padding: 0 4px;
+      }
+      .role-backend .role-type-select { width: 100%; margin-bottom: 8px; }
+      .role-backend .role-fields { display: flex; flex-direction: column; gap: 8px; }
+      .role-backend .settings-field { margin-top: 0; }
       #clarify-box .settings-field label { text-transform: none; font-weight: 600; font-size: 12.5px; }
       #preview-box { max-height: 420px; overflow-y: auto; }
       #preview-body h3 { font-size: 14px; margin: 12px 0 4px; }
@@ -323,26 +333,15 @@
     <div id="settings-box" class="card">
       <p class="card-label">Settings</p>
       <div class="settings-field">
-        <label for="setting-provider">Backend</label>
-        <select id="setting-provider">
-          <option value="ollama">Local Ollama (Llama 3.1 8B Instruct)</option>
-          <option value="claude-cli">Claude CLI</option>
-        </select>
-      </div>
-      <div class="settings-field">
-        <label for="setting-ollama-url">Ollama URL</label>
+        <label for="setting-ollama-url">Ollama server URL (shared default)</label>
         <input type="text" id="setting-ollama-url" placeholder="http://localhost:11434/v1/chat/completions">
       </div>
-      <p class="settings-hint">Used when the backend above is "Local Ollama". The prompt-audit step (see the plan card) always uses this regardless of which backend is selected.</p>
-      <div class="settings-field">
-        <label for="setting-claude-cli-path">Claude CLI path</label>
-        <input type="text" id="setting-claude-cli-path" placeholder="claude">
-      </div>
-      <div class="settings-field">
-        <label for="setting-claude-cli-model">Claude CLI model</label>
-        <input type="text" id="setting-claude-cli-model" placeholder="claude-sonnet-5">
-      </div>
-      <p class="settings-hint">Used when the backend above is "Claude CLI" — shells out to a locally-installed <code>claude</code> CLI instead of a separately-managed API key. Requires the CLI installed and logged in on this machine.</p>
+      <p class="settings-hint">Used by any role below set to "Ollama (local)" that doesn't need a different server.</p>
+
+      <p class="field-label" style="margin-top:18px;">Per-role backend</p>
+      <p class="settings-hint">Each of the 5 pipeline roles can point at a different backend and model — not just a different Ollama tag.</p>
+      <div id="role-settings"></div>
+
       <div class="actions">
         <button id="save-settings-btn" onclick="saveSettings()">Save</button>
         <button class="secondary" onclick="toggleSettings()">Close</button>
@@ -384,7 +383,7 @@
 
     <div id="clarify-box" class="card">
       <p class="card-label">A few quick questions</p>
-      <p class="roles-hint">The local prompt auditor (Llama 3.1 8B Instruct) needs a bit more detail before it can draft a plan.</p>
+      <p class="roles-hint">The Orchestrator needs a bit more detail before it can draft a plan.</p>
       <div id="clarify-questions"></div>
       <div class="actions">
         <button id="clarify-submit-btn" onclick="submitClarifications()">Submit &amp; Continue</button>
@@ -394,7 +393,7 @@
 
     <div id="plan-box" class="card">
       <p class="card-label">Proposed plan</p>
-      <p class="roles-hint" style="margin-top:-6px;">Reviewed locally by the prompt auditor (Llama 3.1 8B Instruct) before this reaches your configured backend.</p>
+      <p class="roles-hint" style="margin-top:-6px;">Drafted by the Orchestrator role — see Settings for which backend it's using.</p>
       <p id="plan-text"></p>
       <div class="actions">
         <button id="approve-btn" onclick="approve()">Approve &amp; Preview</button>
@@ -872,21 +871,108 @@
         if (opening) loadSettings();
       }
 
+      var roleCatalogCache = null;
+
+      // Every role offers every backend type as a tick-free dropdown, with
+      // only the fields relevant to the selected type shown — roleCatalog
+      // comes from the main process (source of truth: engine.js's
+      // ROLE_DEFAULTS/BACKEND_TYPES) so this UI can't drift from the backend.
+      function makeField(key, label, value, placeholder, isSecret) {
+        var wrap = document.createElement('div');
+        wrap.className = 'settings-field';
+        var lbl = document.createElement('label');
+        lbl.textContent = label;
+        var input = document.createElement('input');
+        input.type = isSecret ? 'password' : 'text';
+        input.setAttribute('data-field', key);
+        input.value = value || '';
+        if (placeholder) input.placeholder = placeholder;
+        wrap.appendChild(lbl);
+        wrap.appendChild(input);
+        return wrap;
+      }
+
+      function renderRoleSettings(catalog, savedConfig) {
+        var container = document.getElementById('role-settings');
+        container.innerHTML = '';
+        Object.keys(catalog.roles).forEach(function (role) {
+          var def = catalog.roles[role];
+          var current = (savedConfig && savedConfig[role] && savedConfig[role].type) ? savedConfig[role] : { type: def.type, model: def.model };
+
+          var fieldset = document.createElement('fieldset');
+          fieldset.className = 'role-backend';
+          fieldset.setAttribute('data-role', role);
+
+          var legend = document.createElement('legend');
+          legend.textContent = def.roleLabel + ' (default: ' + def.model + ')';
+          fieldset.appendChild(legend);
+
+          var typeSelect = document.createElement('select');
+          typeSelect.className = 'role-type-select';
+          catalog.backendTypes.forEach(function (bt) {
+            var opt = document.createElement('option');
+            opt.value = bt.value;
+            opt.textContent = bt.label;
+            if (current.type === bt.value) opt.selected = true;
+            typeSelect.appendChild(opt);
+          });
+          fieldset.appendChild(typeSelect);
+
+          var fieldsWrap = document.createElement('div');
+          fieldsWrap.className = 'role-fields';
+          fieldset.appendChild(fieldsWrap);
+
+          function renderFields(type) {
+            fieldsWrap.innerHTML = '';
+            if (type === 'claude-cli') {
+              fieldsWrap.appendChild(makeField('path', 'CLI path', current.type === 'claude-cli' ? current.path : '', 'claude'));
+              fieldsWrap.appendChild(makeField('model', 'Model', current.type === 'claude-cli' ? current.model : '', 'claude-sonnet-5'));
+            } else if (type === 'openai-compatible') {
+              fieldsWrap.appendChild(makeField('url', 'Endpoint URL', current.type === 'openai-compatible' ? current.url : '', 'http://localhost:1234/v1/chat/completions'));
+              fieldsWrap.appendChild(makeField('apiKey', 'API key (optional)', '', 'leave blank if none', true));
+              fieldsWrap.appendChild(makeField('model', 'Model', current.type === 'openai-compatible' ? current.model : '', ''));
+            } else {
+              fieldsWrap.appendChild(makeField('model', 'Model tag', current.type === 'ollama' ? current.model : def.model, def.model));
+            }
+          }
+          typeSelect.addEventListener('change', function () { renderFields(typeSelect.value); });
+          renderFields(current.type);
+
+          container.appendChild(fieldset);
+        });
+      }
+
+      function readRoleSettings() {
+        var config = {};
+        Array.prototype.forEach.call(document.querySelectorAll('.role-backend'), function (fieldset) {
+          var role = fieldset.getAttribute('data-role');
+          var type = fieldset.querySelector('.role-type-select').value;
+          var entry = { type: type };
+          Array.prototype.forEach.call(fieldset.querySelectorAll('[data-field]'), function (input) {
+            var v = input.value.trim();
+            if (v) entry[input.getAttribute('data-field')] = v;
+          });
+          config[role] = entry;
+        });
+        return config;
+      }
+
       function loadSettings() {
-        window.desktop.getSettings().then(function (settings) {
-          document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'ollama';
+        Promise.all([
+          window.desktop.getSettings(),
+          roleCatalogCache ? Promise.resolve(roleCatalogCache) : window.desktop.getRoleCatalog()
+        ]).then(function (results) {
+          var settings = results[0];
+          roleCatalogCache = results[1];
           document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
-          document.getElementById('setting-claude-cli-path').value = settings.CLAUDE_CLI_PATH || '';
-          document.getElementById('setting-claude-cli-model').value = settings.CLAUDE_CLI_MODEL || '';
+          renderRoleSettings(roleCatalogCache, settings.ROLE_BACKEND_CONFIG || {});
         });
       }
 
       function saveSettings() {
         var settings = {
-          LLM_PROVIDER: document.getElementById('setting-provider').value,
           OLLAMA_URL: document.getElementById('setting-ollama-url').value.trim(),
-          CLAUDE_CLI_PATH: document.getElementById('setting-claude-cli-path').value.trim(),
-          CLAUDE_CLI_MODEL: document.getElementById('setting-claude-cli-model').value.trim()
+          ROLE_BACKEND_CONFIG: readRoleSettings()
         };
         window.desktop.setSettings(settings).then(function () {
           toggleSettings();
@@ -895,15 +981,26 @@
       }
 
       function refreshProviderStatus() {
-        window.desktop.getSettings().then(function (settings) {
-          var provider = settings.LLM_PROVIDER || 'ollama';
-          var el = document.getElementById('provider-status');
-          if (provider === 'claude-cli') {
-            el.textContent = 'Using Claude CLI (' + (settings.CLAUDE_CLI_PATH || 'claude') + ')';
-          } else {
-            el.textContent = 'Using local Ollama (' + (settings.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions') + ')';
-          }
-        });
+        Promise.all([window.desktop.getSettings(), roleCatalogCache ? Promise.resolve(roleCatalogCache) : window.desktop.getRoleCatalog()])
+          .then(function (results) {
+            var settings = results[0];
+            var catalog = results[1];
+            roleCatalogCache = catalog;
+            var config = settings.ROLE_BACKEND_CONFIG || {};
+            var typeLabel = {};
+            catalog.backendTypes.forEach(function (bt) { typeLabel[bt.value] = bt.label; });
+            var counts = {};
+            var order = [];
+            Object.keys(catalog.roles).forEach(function (role) {
+              var type = (config[role] && config[role].type) || catalog.roles[role].type;
+              if (!counts[type]) { counts[type] = 0; order.push(type); }
+              counts[type]++;
+            });
+            var summary = order.map(function (type) {
+              return (typeLabel[type] || type) + ' (' + counts[type] + (counts[type] === 1 ? ' role' : ' roles') + ')';
+            }).join(' · ');
+            document.getElementById('provider-status').textContent = summary;
+          });
       }
 
       // --- First-run local-LLM setup ---
@@ -928,19 +1025,20 @@
       }
 
       // Decide whether to show the first-run panel and in which state. Only
-      // nags for the local-first default (provider 'ollama') and only until the
-      // user finishes or skips.
+      // nags when at least one role is currently configured for the 'ollama'
+      // backend (st.required > 0 — computed dynamically from Settings, not a
+      // fixed provider flag) and only until the user finishes or skips.
       function checkFirstRunSetup() {
         if (!window.desktop.llmStatus) return;
         window.desktop.llmStatus().then(function (st) {
           var box = document.getElementById('llm-setup-box');
           var msg = document.getElementById('llm-setup-msg');
           var dl = document.getElementById('llm-download-btn');
-          if (st.provider !== 'ollama' || st.setupDone) { box.style.display = 'none'; return; }
+          if (st.required === 0 || st.setupDone) { box.style.display = 'none'; return; }
           if (!st.ollamaUp) {
-            msg.innerHTML = 'LazyOffice runs on a local LLM (Ollama), but no Ollama server was found at ' +
+            msg.innerHTML = 'One or more roles are set to use local Ollama, but no Ollama server was found at ' +
               st.host + '. Install it from ollama.com/download and start it, then click Recheck — ' +
-              'or switch to a cloud model in Settings.';
+              'or switch those roles to a different backend in Settings.';
             document.getElementById('llm-setup-models').innerHTML = '';
             dl.style.display = 'none';
             box.style.display = 'block';

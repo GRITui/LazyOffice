@@ -28,24 +28,36 @@ ipcMain.handle('lazyoffice:buildContent', (event, userRequest, attachments, outp
 ipcMain.handle('lazyoffice:createOutput', (event, outputType, parsed) => docgen.createOutput(outputType, parsed));
 ipcMain.handle('lazyoffice:openInFinder', (event, filePath) => shell.showItemInFolder(filePath));
 
+// Lets the renderer build the per-role Settings UI from the same data engine.js
+// actually uses, so the two can never drift apart.
+ipcMain.handle('lazyoffice:getRoleCatalog', () => ({
+  roles: engine.ROLE_DEFAULTS,
+  backendTypes: engine.BACKEND_TYPES
+}));
+
 // --- First-run local-LLM setup ---
-// Report whether Ollama is up, what's installed, which required models are
-// missing, and whether the user has already completed/dismissed setup.
+// Report whether Ollama is up, what's installed, and which models are still
+// missing — computed from whichever roles are *currently* configured to use
+// the 'ollama' backend, not a fixed list. A role pointed at Claude CLI or a
+// custom endpoint needs nothing downloaded.
 ipcMain.handle('lazyoffice:llmStatus', async () => {
-  const st = await setupLlm.status(ollamaHost());
-  st.provider = ScriptProperties.getProperty('LLM_PROVIDER') || 'ollama';
+  const required = engine.computeOllamaRequiredModels();
+  const st = await setupLlm.status(ollamaHost(), required);
   st.setupDone = ScriptProperties.getProperty('LLM_SETUP_DONE') === 'true';
   st.host = ollamaHost();
   return st;
 });
 
 // Pull the missing required models, streaming progress to the renderer. Marks
-// setup done once everything the pipeline needs is present.
+// setup done once everything the currently-configured Ollama roles need is
+// present.
 ipcMain.handle('lazyoffice:llmSetup', async (event) => {
   const wc = event.sender;
   const host = ollamaHost();
+  const required = engine.computeOllamaRequiredModels();
   const final = await setupLlm.ensureModels(
     host,
+    required,
     (p) => { if (!wc.isDestroyed()) wc.send('lazyoffice:llmProgress', p); },
     (m) => { if (!wc.isDestroyed()) wc.send('lazyoffice:llmModelDone', m); }
   );
@@ -58,15 +70,15 @@ ipcMain.handle('lazyoffice:llmMarkDone', () => {
   ScriptProperties.setProperty('LLM_SETUP_DONE', 'true');
 });
 
-// No secrets among these — the Claude API key (and the safeStorage
-// encryption that protected it at rest) is gone along with the Claude API
-// option; CLAUDE_CLI_PATH/CLAUDE_CLI_MODEL configure the local `claude`
-// binary, not a credential.
+// ROLE_BACKEND_CONFIG is a single JSON object, { role: {type, model, url,
+// path, apiKey} }. Note: a custom OpenAI-compatible endpoint's apiKey, if
+// set, is stored in plaintext here, the same as OLLAMA_URL/CLAUDE_CLI_PATH —
+// see README's Known Gaps. There's no separately-managed Anthropic API key
+// in this app anymore, so nothing here got safeStorage encryption reinstated
+// for this pass.
 const SETTINGS_KEYS = [
-  'LLM_PROVIDER',
   'OLLAMA_URL',
-  'CLAUDE_CLI_PATH',
-  'CLAUDE_CLI_MODEL'
+  'ROLE_BACKEND_CONFIG'
 ];
 
 ipcMain.handle('lazyoffice:getSettings', () => {

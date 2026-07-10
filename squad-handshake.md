@@ -157,6 +157,49 @@ been built — both tracks so far were implemented directly to prove the end-to-
     Ollama even with the backend set to `claude-cli`. **Never run against a real installed
     `claude` CLI** — flagged in `desktop-app/README.md` as framework-stage, not finished.
 
+* `desktop-app/` per-role backend rebuild (TSK-003, not yet committed): Owner asked whether the
+  First Goal doc's dedicated Orchestrator role (Qwen3.5-9B) could come back while still letting
+  any role be wired to any backend, not just Ollama. Scoped via two clarifying questions — all 5
+  First Goal doc roles get independent backend config (not Orchestrator alone), and a third
+  backend type, a generic OpenAI-compatible endpoint (URL + optional API key + model), joins
+  Ollama and Claude CLI. Rebuilt:
+  - `engine.js`: `ROLE_DEFAULTS` restores the 5-role mapping (Orchestrator/Qwen3.5-9B,
+    Planner/DeepSeek-R1-Distill-Qwen-7B, Syntax Enforcer/Phi-4-mini, Code Engine/Granite 4.1 8B,
+    Generalist/Llama 3.1 8B), each defaulting to Ollama. `resolveRoleConfig(role)` merges a
+    role's stored override (new `ROLE_BACKEND_CONFIG` JSON setting) with its default.
+    `callRole(role, systemPrompt, userPrompt)` is the single dispatch point every call site now
+    goes through — `callPromptAuditor`'s old local-Ollama-only bypass is gone, Orchestrator is
+    just another independently-configurable role like the other 4.
+    `computeOllamaRequiredModels()` derives the first-run download list dynamically from
+    whichever roles currently resolve to Ollama.
+  - `docgen.js`'s four LLM call sites (JSON repair, result summary, and all three
+    content-drafting functions) route through `callRole` to `syntax_enforcer`/`generalist`/
+    `code_engine` respectively.
+  - `setup-llm.js`: `REQUIRED_MODELS` constant removed; `status`/`ensureModels` take the
+    required-models list as a parameter instead.
+  - `main.js`: new `getRoleCatalog` IPC handler hands the renderer `ROLE_DEFAULTS`/
+    `BACKEND_TYPES` so Settings can't drift from what `engine.js` dispatches on;
+    `llmStatus`/`llmSetup` now compute the required-models list fresh via
+    `computeOllamaRequiredModels()` on every call; `SETTINGS_KEYS` collapsed to
+    `['OLLAMA_URL', 'ROLE_BACKEND_CONFIG']`.
+  - `renderer/index.html`: Settings panel rebuilt — one fieldset per role (backend-type
+    selector + type-appropriate fields: model tag for Ollama, path/model for Claude CLI,
+    url/API key/model for a custom endpoint), replacing the old single global provider
+    selector. Fixed a bug caught during the rewrite: the first-run-setup check still read the
+    now-removed `st.provider` field, which would have permanently hidden the first-run Ollama
+    panel; changed to check `st.required === 0` instead.
+  - Verified via a logic-test harness: two fake OpenAI-compatible HTTP servers (standing in for
+    the shared Ollama server and a custom endpoint) plus a fake `claude` CLI, confirming
+    fresh-install defaults match the First Goal doc's 5-role mapping, an unconfigured role uses
+    the shared Ollama URL, overriding one role's config redirects only that role and leaves the
+    rest on defaults, `computeOllamaRequiredModels` correctly drops a role once it's pointed
+    elsewhere, and the full `buildContent`→`createOutput` pipeline still produces a valid
+    `.docx` with Code Engine routed through a completely different backend than the rest of the
+    app. **Never run against a real Electron window, a real Ollama server, a real `claude` CLI,
+    or a real third-party OpenAI-compatible endpoint** — flagged in `desktop-app/README.md`.
+  - Separately, Owner asked to "delete old app asset"; asked to name the exact target, Owner
+    said nothing should be deleted — `apps-script/` and everything else left untouched.
+
 ## Blockers & QA Failures
 
 * RESOLVED (2026-07-09): TSK-003 now runs in a real Electron window. `npm start` and the
@@ -186,6 +229,11 @@ been built — both tracks so far were implemented directly to prove the end-to-
 * Same caveat again for the single-model collapse + Claude CLI framework directly below that:
   the CLI wiring was verified against a fake `claude` binary (exact argv shape, JSON-result
   parsing, non-zero-exit and ENOENT error paths), never against a real installed CLI.
+* Same caveat again for the per-role backend rebuild directly above: logic-tested against fake
+  HTTP backends and a fake `claude` binary only, never against a real Electron window or real
+  Ollama/Claude CLI/third-party endpoint infrastructure. Also carried forward: a custom
+  endpoint's API key is stored in plaintext in `config.json`, same as the rest of
+  `ROLE_BACKEND_CONFIG` — flagged as a known gap in `desktop-app/README.md`, not yet fixed.
 
 ## Cross-Squad Requests
 
