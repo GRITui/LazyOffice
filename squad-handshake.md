@@ -1,6 +1,6 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T18:39:14Z
+Last Updated: 2026-07-11T00:00:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
@@ -93,6 +93,12 @@ been built — both tracks so far were implemented directly to prove the end-to-
   the owner hit downloading the unsigned v0.1.0 dmg — plus turnkey signing steps. Version bumped
   to 0.1.1. Remaining: owner enrolls in Apple Developer Program, then one `npm run dist` produces
   a notarized dmg that opens with a normal double-click.
+
+* Harness maintenance (TSK-004, branch `claude/squad-harness-consolidation`, does not touch
+  `desktop-app/` or `apps-script/`): adopted the GRITui-portfolio canonical squad-harness
+  convention — added `dev-log.md`, and a Model/Effort policy table + Reuse Ledger to
+  `CLAUDE.md`. `active_task_id`/`sprint_completion_percentage` above still reflect TSK-003,
+  the actual in-flight engineering work; this was a process-only change alongside it.
 
 ## Blockers & QA Failures
 

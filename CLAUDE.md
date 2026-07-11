@@ -26,6 +26,10 @@ conversation between agents:
   `<task_item>` entries; only items marked `READY_FOR_PM` should be picked up for execution.
 - `squad-handshake.md` — current status per squad, updated after each unit of work: active
   task, recent commits, blockers, cross-squad requests.
+- `dev-log.md` — append-only, one line per unit of work (timestamp, agent, task-id, files
+  touched, QA result, status). Added 2026-07-11: the audit trail the circuit breaker below
+  counts against, kept separate from `squad-handshake.md` because that file is overwritten
+  in place and can't answer "how many consecutive QA failures on this task" on its own.
 
 Follow the Squad Setup doc's crash-proofing convention for these files: extract data with
 regex/tag matching, not strict JSON parsing, and fail soft (log a warning, skip, retry)
@@ -35,7 +39,29 @@ rather than crashing on malformed content.
 
 If a task fails validation/QA 3 times in a row, mark it `<status>BLOCKED</status>` in the
 relevant file and move on to the next priority item — do not stall the whole loop on one
-blocked task.
+blocked task. Count consecutive `QA:FAIL` lines for a task-id in `dev-log.md` to decide when
+this fires.
+
+## Model / Effort policy
+
+Pattern borrowed from FreeLanz (`gritui/freelanz`'s `project-changelog-handshake.md`) — pick
+the cheapest tier that can do the task correctly rather than defaulting to the most expensive
+model for everything:
+
+| Task kind | Model | Effort |
+| --- | --- | --- |
+| Routine implementation (a single script, a UI tweak) | Sonnet | low/medium |
+| Architecture / cross-cutting decisions (pipeline design, provider routing) | Opus | high |
+| Verification / adversarial QA review | Sonnet or Opus | high |
+
+## Reuse Ledger
+
+Pattern borrowed from FreeLanz. Log every time code or convention crosses a repo boundary, at
+the time it happens, not retroactively:
+
+| Component | Direction | Notes |
+| --- | --- | --- |
+| Squad-harness process convention (`backlog-inbox.md`/`squad-handshake.md`/circuit breaker) | Referenced by `gritui/my-ai-crew` | my-ai-crew's README originally claimed to have inherited `apps-script/`, `desktop-app/`, and `tools/validate-harness.js` as literal files — none of those exist there, and `tools/validate-harness.js` never existed in this repo either. Corrected 2026-07-11 to point to the consolidated `squad-harness/` package in `gritui/my-ai-crew` instead of claiming inherited code. |
 
 ## Current milestone
 
