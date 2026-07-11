@@ -94,11 +94,13 @@ been built — both tracks so far were implemented directly to prove the end-to-
   to 0.1.1. Remaining: owner enrolls in Apple Developer Program, then one `npm run dist` produces
   a notarized dmg that opens with a normal double-click.
 
-* Harness maintenance (TSK-004, branch `claude/squad-harness-consolidation`, does not touch
+* Harness maintenance (TSK-005, branch `claude/squad-harness-consolidation`, does not touch
   `desktop-app/` or `apps-script/`): adopted the GRITui-portfolio canonical squad-harness
   convention — added `dev-log.md`, and a Model/Effort policy table + Reuse Ledger to
   `CLAUDE.md`. `active_task_id`/`sprint_completion_percentage` above still reflect TSK-003,
   the actual in-flight engineering work; this was a process-only change alongside it.
+  Numbered TSK-005 rather than TSK-004 because open PR #9 (`claude/gmail-connection-3vlefm`)
+  already claims TSK-004 for an unrelated, unmerged item — see backlog-inbox.md.
 
 ## Blockers & QA Failures
 

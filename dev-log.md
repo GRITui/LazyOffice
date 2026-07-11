@@ -18,4 +18,5 @@ before this line lived only in `squad-handshake.md`'s "Recent Commits" prose sec
 repo's own git log; not backfilled here to avoid inventing timestamps/QA results that weren't
 recorded at the time).
 
-2026-07-11T00:00:00Z | owner-assistant | TSK-004 | CLAUDE.md, dev-log.md | QA:SKIPPED | DONE
+2026-07-11T00:00:00Z | owner-assistant | TSK-005 | CLAUDE.md, dev-log.md | QA:SKIPPED | DONE
+2026-07-11T00:05:00Z | owner-assistant | TSK-005 | CLAUDE.md, backlog-inbox.md | QA:SKIPPED | DONE (renumbered TSK-004->TSK-005 and corrected a false "never existed" claim re: tools/validate-harness.js, which exists in open PR #9)

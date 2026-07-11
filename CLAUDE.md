@@ -61,8 +61,8 @@ the time it happens, not retroactively:
 
 | Component | Borrowed From | Notes |
 | --- | --- | --- |
-| Squad-harness process convention (`backlog-inbox.md`/`squad-handshake.md`/circuit breaker) | — (this repo is the origin; referenced by `gritui/my-ai-crew`, not borrowed from it) | my-ai-crew's README originally claimed to have inherited `apps-script/`, `desktop-app/`, and `tools/validate-harness.js` as literal files — none of those exist there, and `tools/validate-harness.js` never existed in this repo either. Corrected 2026-07-11 to point to the consolidated `squad-harness/` package in `gritui/my-ai-crew` instead of claiming inherited code. |
-| Model/Effort policy table + this Reuse Ledger section | `gritui/freelanz`'s `project-changelog-handshake.md` | Adopted here as part of the portfolio-wide squad-harness consolidation (TSK-004). |
+| Squad-harness process convention (`backlog-inbox.md`/`squad-handshake.md`/circuit breaker) | — (this repo is the origin; referenced by `gritui/my-ai-crew`, not borrowed from it) | my-ai-crew's README originally claimed to have inherited `apps-script/`, `desktop-app/`, and `tools/validate-harness.js` from this repo as already-integrated files. `apps-script/` and `desktop-app/` genuinely don't exist in that repo. `tools/validate-harness.js` is real, but as of 2026-07-11 it only exists in this repo's still-open, unmerged PR #9 (`claude/gmail-connection-3vlefm`) — not on the default branch, so the "inherited" claim was still inaccurate, but "never existed" (an earlier draft of this note) was itself wrong. Corrected 2026-07-11; my-ai-crew's README now points to the consolidated `squad-harness/` package instead of claiming inherited code. |
+| Model/Effort policy table + this Reuse Ledger section | `gritui/freelanz`'s `project-changelog-handshake.md` | Adopted here as part of the portfolio-wide squad-harness consolidation (TSK-005). |
 
 ## Current milestone
 
