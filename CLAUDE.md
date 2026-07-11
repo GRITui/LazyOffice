@@ -59,9 +59,10 @@ model for everything:
 Pattern borrowed from FreeLanz. Log every time code or convention crosses a repo boundary, at
 the time it happens, not retroactively:
 
-| Component | Direction | Notes |
+| Component | Borrowed From | Notes |
 | --- | --- | --- |
-| Squad-harness process convention (`backlog-inbox.md`/`squad-handshake.md`/circuit breaker) | Referenced by `gritui/my-ai-crew` | my-ai-crew's README originally claimed to have inherited `apps-script/`, `desktop-app/`, and `tools/validate-harness.js` as literal files — none of those exist there, and `tools/validate-harness.js` never existed in this repo either. Corrected 2026-07-11 to point to the consolidated `squad-harness/` package in `gritui/my-ai-crew` instead of claiming inherited code. |
+| Squad-harness process convention (`backlog-inbox.md`/`squad-handshake.md`/circuit breaker) | — (this repo is the origin; referenced by `gritui/my-ai-crew`, not borrowed from it) | my-ai-crew's README originally claimed to have inherited `apps-script/`, `desktop-app/`, and `tools/validate-harness.js` as literal files — none of those exist there, and `tools/validate-harness.js` never existed in this repo either. Corrected 2026-07-11 to point to the consolidated `squad-harness/` package in `gritui/my-ai-crew` instead of claiming inherited code. |
+| Model/Effort policy table + this Reuse Ledger section | `gritui/freelanz`'s `project-changelog-handshake.md` | Adopted here as part of the portfolio-wide squad-harness consolidation (TSK-004). |
 
 ## Current milestone
 
