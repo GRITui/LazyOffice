@@ -1,19 +1,20 @@
-# LazyOffice
+#LazyOffice
 
-Office automation assistant: chat a request, review the plan, approve, get a real Google Doc.
-
-This is Milestone 1 of the project described in `CLAUDE.md` — a thin end-to-end slice, not
-the full multi-model pipeline from the First Goal doc.
-
-## What's here
-
-- `apps-script/` — a standalone Google Apps Script (GAS) Web App:
-  - `Index.html` — chat UI: request box, plan preview, approve button, result link.
-  - `Code.gs` — server logic: calls the Anthropic API to draft a plan, then (on approval) to
-    draft document content, and creates the Google Doc via `DocumentApp`.
-  - `appsscript.json` — manifest; deployed with `executeAs: USER_DEPLOYING` /
-    `access: ANYONE` — any signed-in Google account can open the deployment (no domain
-    restriction, no anonymous access).
+Can a local desktop app outperform today’s expensive cloud AI subscriptions? 🤔
+That’s the exact question I’m trying to answer with my new side project: LazyOffice.
+Everyone is building wrappers around the same few cloud APIs, but I wanted to see what happens when we bring the power back to the local machine. LazyOffice is a document editing program powered entirely by a backend orchestration of 5 specialized local LLMs.
+The goal?
+✅ Zero subscription fees
+✅ Complete data privacy (everything runs locally)
+✅ Specialized, task-specific AI agents working together seamlessly
+⚠️ The Reality Check (Hardware Disclaimer):
+Running 5 models locally isn't free. To get the best results, it requires high-performance hardware.
+Here are my early test results running it on a base Mac M1:
+•	Document Editing: Surprisingly okay! The local orchestration handles text manipulation quite well.
+•	Presentation Generation: Frankly, pretty bad right now. It completely bottlenecks the M1 chip when dealing with complex structural layouts.
+I’m building this out in the open to see how far we can push local optimization. If you’re interested in Local AI, LLM orchestration, or want to test it on your own hardware (especially if you have a beefier GPU!), check out the repo below.
+🔗 https://github.com/GRITui/LazyOffice
+#LocalAI #LLM #BuildInPublic #OpenSource #ProductivityTools #MacM1 #AI
 
 ## Deploying
 
