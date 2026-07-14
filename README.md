@@ -7,15 +7,21 @@ That’s the exact question I’m trying to answer with my new side project: Laz
 Everyone is building wrappers around the same few cloud APIs, but I wanted to see what happens when we bring the power back to the local machine. LazyOffice is a document editing program powered entirely by a backend orchestration of 5 specialized local LLMs.
 
 The goal?
+
 ✅ Zero subscription fees
+
 ✅ Complete data privacy (everything runs locally)
+
 ✅ Specialized, task-specific AI agents working together seamlessly
 
 ⚠️ The Reality Check (Hardware Disclaimer):
 Running 5 models locally isn't free. To get the best results, it requires high-performance hardware.
 Here are my early test results running it on a base Mac M1:
+
 •	Document Editing: Surprisingly okay! The local orchestration handles text manipulation quite well.
+
 •	Presentation Generation: Frankly, pretty bad right now. It completely bottlenecks the M1 chip when dealing with complex structural layouts.
+
 I’m building this out in the open to see how far we can push local optimization. If you’re interested in Local AI, LLM orchestration, or want to test it on your own hardware (especially if you have a beefier GPU!), check out the repo below.
 
 
