@@ -1,11 +1,11 @@
 # Handshake: Engineer-Squad
 
-Last Updated: 2026-07-09T18:39:14Z
+Last Updated: 2026-07-10T17:10:00Z
 
 <squad_metadata>
   <squad_name>Engineer-Squad</squad_name>
-  <current_status>EXECUTING</current_status>
-  <active_task_id>TSK-003</active_task_id>
+  <current_status>IDLE</current_status>
+  <active_task_id>NONE</active_task_id>
   <sprint_completion_percentage>100</sprint_completion_percentage>
 </squad_metadata>
 
@@ -93,6 +93,19 @@ been built — both tracks so far were implemented directly to prove the end-to-
   the owner hit downloading the unsigned v0.1.0 dmg — plus turnkey signing steps. Version bumped
   to 0.1.1. Remaining: owner enrolls in Apple Developer Program, then one `npm run dist` produces
   a notarized dmg that opens with a normal double-click.
+
+* TSK-004 (2026-07-10, DONE): first task executed through the full squad loop for real —
+  Ingestion (owner popup) → Triage (researcher notes, READY_FOR_PM) → Execution (Engineer
+  agent built `tools/validate-harness.js` + `tools/validate-harness.test.js`: fail-soft,
+  block-scoped backlog parser per the CLAUDE.md crash-proofing convention, plus a 7-case
+  test suite and CLI) → QA (independent agent: re-ran the suite, exit 0, and ran adversarial
+  probes incl. repeated malformed blocks, unclosed block tags, duplicate fields, and a ~1MB
+  synthetic backlog parsed in 74ms) → Commit. QA verdict PASS, zero criteria violations;
+  3 non-blocking notes filed on degenerate inputs (dangling open blocks absorb a sibling
+  silently; literal `</task_item>` in a description truncates it; quadratic scan on
+  pathological all-open-tag input). This completes the harness validation started with the
+  2026-07-10 synthetic run (parsing/circuit-breaker/phase-isolation tests, 4/4 PASS) — the
+  loop conventions are now exercised end-to-end on real state files, not just test copies.
 
 ## Blockers & QA Failures
 
