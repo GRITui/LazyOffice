@@ -56,6 +56,22 @@ been built — both tracks so far were implemented directly to prove the end-to-
   encryption is unavailable (verified with an 8-assertion headless Electron test). README now
   documents the code-signing/notarization steps that remain (owner-provided Apple cert).
 
+* `desktop-app/` ox-alpha rollout completed end-to-end (2026-08-24, autonomous run): PR #11
+  merged to the default branch; desktop-app rebuilt from merged HEAD. Environment notes: the
+  Node 26 electron postinstall bug reproduced exactly as documented (broken stub, no path.txt);
+  fixed via cached-zip extraction (ditto) — note the zip extract must COMPLETE or Frameworks/
+  are missing (first attempt was interrupted and produced a SIGABRT binary; re-extract fixed).
+  `npm run pack` + `npm run dist` both succeed (unsigned; notarize hook no-ops without Apple
+  creds). New `tools/gui-smoke.py`: CDP GUI smoke driver (stdlib-only WebSocket client,
+  RFC-masked frames) checking boot health, provider dropdown/status, settings persistence via
+  IPC, encryption-at-rest (enc:v1: prefix in config.json), and a live Get Plan round-trip
+  through the real renderer — 5/5 PASS, zero console exceptions. Owner's live config migrated
+  from Ollama to ox-alpha THROUGH the real Settings flow (pre-existing Ollama role models
+  preserved untouched; byte-for-byte config backup taken first). Artifacts:
+  release/LazyOffice-0.1.1-arm64.dmg (100M, hdiutil verify CRC OK) + mac.zip. Remaining:
+  notarization still blocked on Apple Developer cert; root README positioning still pending
+  owner decision.
+
 * `desktop-app/` QA pass + fixes (TSK-003, not yet committed): ran a high-effort multi-agent
   code review over the P1 + polish commits; it found 8 confirmed issues, all in the just-added
   code. Fixed all: the serious ones were in the `safeStorage` change — a decrypt-failure +
