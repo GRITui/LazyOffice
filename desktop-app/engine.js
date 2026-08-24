@@ -50,12 +50,16 @@ async function callOpenRouter(systemPrompt, userPrompt) {
     throw new Error('OPENROUTER_API_KEY is not set. Open Settings and add your OpenRouter API key (for ox-alpha).');
   }
 
-  // ox-alpha is a hybrid reasoning model: occasionally every token goes into
-  // the internal reasoning channel and `content` comes back empty (or the
-  // content arrives as an array of parts instead of a plain string). Retry
-  // once on empty, and normalize both shapes before returning.
+  // Resilience policy, driven by real incidents: ox-alpha occasionally (a)
+  // returns 429 from OpenRouter's shared upstream pool ("temporarily
+  // rate-limited — retry shortly") and (b) spends every token in its
+  // reasoning channel, leaving `content` empty. Both are transient: retry up
+  // to 3 attempts total, honoring Retry-After on 429/5xx, normalizing
+  // array-part content before returning.
   let lastContent = '';
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let lastError = '';
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const payload = {
       model: OPENROUTER_MODEL_DEFAULT,
       max_tokens: 2048,
@@ -78,7 +82,21 @@ async function callOpenRouter(systemPrompt, userPrompt) {
     });
 
     const text = await response.text();
+    if (response.status === 429 || response.status >= 500) {
+      // Transient upstream failure — back off and try again.
+      lastError = 'OpenRouter error ' + response.status + ': ' + text.slice(0, 300);
+      if (attempt < MAX_ATTEMPTS) {
+        const retryAfterSec = parseInt(response.headers.get('retry-after'), 10);
+        const delayMs = (Number.isFinite(retryAfterSec) && retryAfterSec > 0 && retryAfterSec <= 30)
+          ? retryAfterSec * 1000
+          : 2000 * attempt; // 2s, then 4s
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      throw new Error(lastError + ' — still failing after ' + MAX_ATTEMPTS + ' attempts. Try again shortly.');
+    }
     if (response.status !== 200) {
+      // Non-transient (401 auth, 400 bad request...) — fail fast, no retry.
       throw new Error('OpenRouter error ' + response.status + ': ' + text);
     }
 
@@ -93,9 +111,10 @@ async function callOpenRouter(systemPrompt, userPrompt) {
     if (lastContent.trim()) {
       return lastContent;
     }
-    // Empty content: loop once more before giving up.
+    // Empty content (reasoning channel ate everything) — loop and hope.
   }
-  throw new Error('ox-alpha returned an empty response twice (all output went to its reasoning channel). Try again.');
+  throw new Error('ox-alpha returned an empty response ' + MAX_ATTEMPTS +
+    ' times (all output went to its reasoning channel). Try again.');
 }
 
 async function callClaude(systemPrompt, userPrompt) {
