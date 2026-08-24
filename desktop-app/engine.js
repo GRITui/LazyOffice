@@ -13,10 +13,14 @@ const { ScriptProperties } = require('./config-store');
 const CLAUDE_MODEL = 'claude-sonnet-5';
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 
-// Local-first by default: with no configuration the app runs entirely on a
-// local Ollama server (the 5-role pipeline). A cloud provider (Claude) is
-// opt-in via Settings — see callClaude. 'ollama' | 'claude'.
-const LLM_PROVIDER_DEFAULT = 'ollama';
+// ox-alpha via OpenRouter: the new default provider. One cloud model serves all
+// five pipeline roles — the role arg is kept so the pipeline shape (and any
+// future per-role routing) survives, but every call routes to ox-alpha.
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_MODEL_DEFAULT = 'stealth/ox-alpha';
+
+// Local-first fallback: runs entirely on a local Ollama server.
+const LLM_PROVIDER_DEFAULT = 'openrouter'; // 'openrouter' | 'claude' | 'ollama'
 const OLLAMA_URL_DEFAULT = 'http://localhost:11434/v1/chat/completions';
 const OLLAMA_MODEL_DEFAULT = 'llama3.1:8b';
 
@@ -31,10 +35,67 @@ const OLLAMA_ROLE_MODELS = {
 
 async function callLLM(systemPrompt, userPrompt, role) {
   const provider = ScriptProperties.getProperty('LLM_PROVIDER') || LLM_PROVIDER_DEFAULT;
+  if (provider === 'openrouter') {
+    return callOpenRouter(systemPrompt, userPrompt);
+  }
   if (provider === 'ollama') {
     return callOllama(systemPrompt, userPrompt, role);
   }
   return callClaude(systemPrompt, userPrompt);
+}
+
+async function callOpenRouter(systemPrompt, userPrompt) {
+  const apiKey = ScriptProperties.getProperty('OPENROUTER_API_KEY');
+  if (!apiKey) {
+    throw new Error('OPENROUTER_API_KEY is not set. Open Settings and add your OpenRouter API key (for ox-alpha).');
+  }
+
+  // ox-alpha is a hybrid reasoning model: occasionally every token goes into
+  // the internal reasoning channel and `content` comes back empty (or the
+  // content arrives as an array of parts instead of a plain string). Retry
+  // once on empty, and normalize both shapes before returning.
+  let lastContent = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const payload = {
+      model: OPENROUTER_MODEL_DEFAULT,
+      max_tokens: 2048,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ]
+    };
+
+    const response = await fetch(OPENROUTER_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey,
+        // Optional attribution headers recommended by OpenRouter.
+        'HTTP-Referer': 'https://github.com/GRITui/LazyOffice',
+        'X-Title': 'LazyOffice'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const text = await response.text();
+    if (response.status !== 200) {
+      throw new Error('OpenRouter error ' + response.status + ': ' + text);
+    }
+
+    const body = JSON.parse(text);
+    if (!body.choices || !body.choices[0] || !body.choices[0].message) {
+      throw new Error('Unexpected OpenRouter response shape: ' + text.slice(0, 300));
+    }
+    const raw = body.choices[0].message.content;
+    lastContent = Array.isArray(raw)
+      ? raw.map((part) => (part && typeof part.text === 'string') ? part.text : '').join('')
+      : (typeof raw === 'string' ? raw : '');
+    if (lastContent.trim()) {
+      return lastContent;
+    }
+    // Empty content: loop once more before giving up.
+  }
+  throw new Error('ox-alpha returned an empty response twice (all output went to its reasoning channel). Try again.');
 }
 
 async function callClaude(systemPrompt, userPrompt) {
@@ -228,6 +289,7 @@ module.exports = {
   callLLM,
   callClaude,
   callOllama,
+  callOpenRouter,
   buildAttachmentContext,
   classifyAttachments,
   parseAttachmentRoles,

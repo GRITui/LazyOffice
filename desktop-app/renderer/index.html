@@ -311,9 +311,14 @@
       <div class="settings-field">
         <label for="setting-provider">LLM provider</label>
         <select id="setting-provider">
+          <option value="openrouter">ox-alpha (OpenRouter)</option>
           <option value="claude">Claude API</option>
           <option value="ollama">Local Ollama</option>
         </select>
+      </div>
+      <div class="settings-field">
+        <label for="setting-openrouter-key">OpenRouter API key (ox-alpha)</label>
+        <input type="password" id="setting-openrouter-key" placeholder="sk-or-...">
       </div>
       <div class="settings-field">
         <label for="setting-api-key">Anthropic API key</label>
@@ -712,10 +717,10 @@
 
       function loadSettings() {
         window.desktop.getSettings().then(function (settings) {
-          document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'ollama';
-          // The stored API key is never sent back to the UI. Leave the field blank
-          // and reflect its state via the placeholder; typing a new value replaces
-          // it, leaving it blank keeps the existing one (see saveSettings).
+          document.getElementById('setting-provider').value = settings.LLM_PROVIDER || 'openrouter';
+          // The stored API keys are never sent back to the UI. Leave the field
+          // blank and reflect state via the placeholder; typing a new value
+          // replaces it, leaving it blank keeps the existing one (see saveSettings).
           var apiKeyField = document.getElementById('setting-api-key');
           apiKeyField.value = '';
           if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
@@ -724,6 +729,15 @@
             apiKeyField.placeholder = '•••••••• stored — leave blank to keep, or type to replace';
           } else {
             apiKeyField.placeholder = 'sk-ant-...';
+          }
+          var orKeyField = document.getElementById('setting-openrouter-key');
+          orKeyField.value = '';
+          if (settings.OPENROUTER_API_KEY_UNREADABLE) {
+            orKeyField.placeholder = 'Stored key could not be read on this machine — re-enter it';
+          } else if (settings.OPENROUTER_API_KEY_SET) {
+            orKeyField.placeholder = '•••••••• stored — leave blank to keep, or type to replace';
+          } else {
+            orKeyField.placeholder = 'sk-or-...';
           }
           document.getElementById('setting-ollama-url').value = settings.OLLAMA_URL || '';
           document.getElementById('setting-orchestrator-model').value = settings.OLLAMA_ORCHESTRATOR_MODEL || '';
@@ -744,11 +758,13 @@
           OLLAMA_CODE_ENGINE_MODEL: document.getElementById('setting-code-engine-model').value.trim(),
           OLLAMA_GENERALIST_MODEL: document.getElementById('setting-generalist-model').value.trim()
         };
-        // Only overwrite the stored API key when the user actually typed a new one;
-        // a blank field means "keep the existing key" and is omitted entirely so it
-        // is never clobbered.
+        // Only overwrite a stored API key when the user actually typed a new one;
+        // a blank field means "keep the existing key" and is omitted entirely so
+        // it is never clobbered.
         var apiKey = document.getElementById('setting-api-key').value.trim();
         if (apiKey) settings.ANTHROPIC_API_KEY = apiKey;
+        var orKey = document.getElementById('setting-openrouter-key').value.trim();
+        if (orKey) settings.OPENROUTER_API_KEY = orKey;
         window.desktop.setSettings(settings).then(function () {
           toggleSettings();
           refreshProviderStatus();
@@ -757,9 +773,13 @@
 
       function refreshProviderStatus() {
         window.desktop.getSettings().then(function (settings) {
-          var provider = settings.LLM_PROVIDER || 'ollama';
+          var provider = settings.LLM_PROVIDER || 'openrouter';
           var el = document.getElementById('provider-status');
-          if (provider === 'ollama') {
+          if (provider === 'openrouter') {
+            el.textContent = settings.OPENROUTER_API_KEY_UNREADABLE
+              ? 'Using ox-alpha (OpenRouter) — stored key could not be read on this machine, open Settings to re-enter it'
+              : (settings.OPENROUTER_API_KEY_SET ? 'Using ox-alpha (OpenRouter)' : 'Using ox-alpha (OpenRouter) — no API key set yet, open Settings');
+          } else if (provider === 'ollama') {
             el.textContent = 'Using local Ollama (' + (settings.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions') + ')';
           } else if (settings.ANTHROPIC_API_KEY_UNREADABLE) {
             el.textContent = 'Using Claude API — stored key could not be read on this machine, open Settings to re-enter it';
