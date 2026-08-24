@@ -26,15 +26,15 @@ package), `.xlsx` (`xlsx`/SheetJS), or `.pptx` (`pptxgenjs`) accordingly — no
 
 ## Local-first by default
 
-Out of the box the app runs entirely on a **local Ollama server** — no API key, nothing sent
-to the cloud (`LLM_PROVIDER` defaults to `ollama` in `engine.js`). To use a cloud model
-instead, open Settings, switch the provider to "Claude API", and enter a key (encrypted at
-rest — see below). The key is never sent to the cloud until you opt in.
+Out of the box the app runs on **ox-alpha via OpenRouter** — set an OpenRouter API key in
+Settings (`OPENROUTER_API_KEY`, encrypted at rest). Local-first is still available: switch
+the provider to "Local Ollama" and nothing leaves your machine; or pick "Claude API" with
+an Anthropic key.
 
 ### First-run model setup
 
-On first launch, if the provider is the local default, the app checks the local Ollama server
-(`setup-llm.js`) and shows a one-time setup panel:
+First-run model download only applies when the provider is "Local Ollama". On that setting
+the app checks the local Ollama server (`setup-llm.js`) and shows a one-time setup panel:
 
 - If Ollama **isn't running**, it points you to https://ollama.com/download and offers a
   Recheck button (the Ollama runtime itself is a system component — the app never installs it
@@ -56,7 +56,7 @@ the `OLLAMA_URL` setting (default `http://127.0.0.1:11434`).
 - `setup-llm.js` — first-run local-model detection + pulling (Ollama HTTP API).
 - `preload.js` — exposes a `window.desktop` bridge to the renderer (contextIsolation on,
   nodeIntegration off).
-- `engine.js` — ported LLM logic (`callLLM`/`callClaude`/`callOllama`, attachment role
+- `engine.js` — ported LLM logic (`callLLM`/`callOpenRouter`/`callClaude`/`callOllama`, attachment role
   classification, prompt building, output-type-aware plan drafting). No dead GAS-mock code —
   a desktop app always has a real backend, so the mock/`isGasEnv` branching from
   `Index.html` was dropped, not ported.
@@ -78,11 +78,12 @@ npm install
 npm start
 ```
 
-On first launch, open **Settings** and either paste your Anthropic API key, or switch the
-provider to "Local Ollama" and set the URL/models (defaults match `ollama serve`'s standard
-port and the First Goal doc's model tags — see the root `README.md`'s Ollama table). Pick
-Document, Spreadsheet, or Presentation, describe what you want, review the plan, approve, and
-the file lands in `~/Documents/LazyOffice/`.
+On first launch, open **Settings** and paste your OpenRouter API key (default provider,
+ox-alpha), or switch the provider to "Local Ollama" / "Claude API" and configure those
+instead (Ollama defaults match `ollama serve`'s standard port and the First Goal doc's
+model tags — see the root `README.md`'s Ollama table). Pick Document, Spreadsheet, or
+Presentation, describe what you want, review the plan, approve, and the file lands in
+`~/Documents/LazyOffice/`.
 
 ## Status
 

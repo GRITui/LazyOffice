@@ -22,7 +22,7 @@ function writeConfig(config) {
 // Keys whose values are secrets and should be encrypted at rest (via the OS
 // keychain, through Electron's safeStorage) rather than sitting in plaintext
 // in config.json. Everything else stays plaintext for easy inspection.
-var SENSITIVE_KEYS = { ANTHROPIC_API_KEY: true };
+var SENSITIVE_KEYS = { ANTHROPIC_API_KEY: true, OPENROUTER_API_KEY: true };
 var ENC_PREFIX = 'enc:v1:';
 
 function encryptionAvailable() {

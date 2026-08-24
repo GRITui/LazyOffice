@@ -107,6 +107,21 @@ been built — both tracks so far were implemented directly to prove the end-to-
   2026-07-10 synthetic run (parsing/circuit-breaker/phase-isolation tests, 4/4 PASS) — the
   loop conventions are now exercised end-to-end on real state files, not just test copies.
 
+* `desktop-app/` ox-alpha provider swap (2026-08-24, owner-directed): ox-alpha via OpenRouter
+  added as a third LLM provider AND made the new default (`LLM_PROVIDER_DEFAULT='openrouter'`,
+  model `stealth/ox-alpha`, one cloud model serving all 5 pipeline roles — role arg kept for
+  pipeline-shape compatibility). Claude and Local Ollama remain fully available in Settings.
+  Changes: `engine.js` (`callOpenRouter` with empty-content retry + array-part normalization —
+  ox-alpha is a hybrid reasoning model that occasionally returns everything in its reasoning
+  channel), `config-store.js` + `main.js` (`OPENROUTER_API_KEY` registered as a secret → same
+  keychain encryption-at-rest as the Anthropic key, SET/UNREADABLE-only exposure to renderer),
+  `renderer/index.html` (provider dropdown, key field, status line), `desktop-app/README.md`
+  synced. New `tools/llm-smoke.js`: live smoke harness (Electron-stubbed, skips cleanly when
+  keys are absent). Verified: syntax checks + 7/7 validate-harness tests pass; live endpoint
+  runs green 4/4 consecutive times (getPlan prose + classifyAttachments JSON-array shape +
+  routing fallback error path). Note: the repo's local-first pitch no longer matches the new
+  default — root README positioning is an owner decision. Not yet committed.
+
 ## Blockers & QA Failures
 
 * RESOLVED (2026-07-09): TSK-003 now runs in a real Electron window. `npm start` and the

@@ -32,7 +32,7 @@ ipcMain.handle('lazyoffice:openInFinder', (event, filePath) => shell.showItemInF
 // missing, and whether the user has already completed/dismissed setup.
 ipcMain.handle('lazyoffice:llmStatus', async () => {
   const st = await setupLlm.status(ollamaHost());
-  st.provider = ScriptProperties.getProperty('LLM_PROVIDER') || 'ollama';
+  st.provider = ScriptProperties.getProperty('LLM_PROVIDER') || 'openrouter';
   st.setupDone = ScriptProperties.getProperty('LLM_SETUP_DONE') === 'true';
   st.host = ollamaHost();
   return st;
@@ -60,6 +60,7 @@ ipcMain.handle('lazyoffice:llmMarkDone', () => {
 const SETTINGS_KEYS = [
   'LLM_PROVIDER',
   'ANTHROPIC_API_KEY',
+  'OPENROUTER_API_KEY',
   'OLLAMA_URL',
   'OLLAMA_ORCHESTRATOR_MODEL',
   'OLLAMA_PLANNER_MODEL',
@@ -68,7 +69,7 @@ const SETTINGS_KEYS = [
   'OLLAMA_GENERALIST_MODEL'
 ];
 
-const SECRET_KEYS = ['ANTHROPIC_API_KEY'];
+const SECRET_KEYS = ['ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY'];
 
 ipcMain.handle('lazyoffice:getSettings', () => {
   const props = ScriptProperties.getProperties(); // single read; sensitive values decrypted
