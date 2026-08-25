@@ -138,6 +138,17 @@ been built — both tracks so far were implemented directly to prove the end-to-
   routing fallback error path). Note: the repo's local-first pitch no longer matches the new
   default — root README positioning is an owner decision. Not yet committed.
 
+* `desktop-app/` live-LLM E2E + resilience hardening (2026-08-24): engine.js `callOpenRouter`
+  now retries transient failures — 429/5xx up to 3 attempts honoring Retry-After (<=30s),
+  else 2s/4s backoff; non-transient errors fail fast — after a real session hit OpenRouter's
+  shared-pool 429 mid-generation. New `tools/e2e-generate.py`: full HITL flow per output type
+  (request -> Get Plan -> Approve & Generate) over CDP against LIVE ox-alpha, verifying file
+  bytes not just existence (OOXML text-run extraction incl. SheetJS `<c t="str"><v>` cells).
+  Result: docx/xlsx/pptx ALL PASS with real content, zero console exceptions — first true
+  end-to-end run against the production LLM path (earlier QA used a stand-in). gui-smoke.py's
+  CDP client fixed to answer Chromium WS pings (long sessions were dropped at ~60s). Fresh
+  dmg built + hdiutil-verified. Notarization + root-README positioning still owner decisions.
+
 ## Blockers & QA Failures
 
 * RESOLVED (2026-07-09): TSK-003 now runs in a real Electron window. `npm start` and the

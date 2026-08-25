@@ -83,17 +83,34 @@ class CDP:
         self.sock.sendall(bytes(frame))
 
     def _recv_frame(self):
-        header = self._recv_exact(2)
-        opcode = header[0] & 0x0F
-        length = header[1] & 0x7F
-        if length == 126:
-            length = struct.unpack(">H", self._recv_exact(2))[0]
-        elif length == 127:
-            length = struct.unpack(">Q", self._recv_exact(8))[0]
-        payload = self._recv_exact(length)
-        if opcode == 8:
-            raise RuntimeError("websocket closed by peer")
-        return payload
+        # Loop over control frames: answer pings (Chromium disconnects clients
+        # that don't pong within ~1 min), ignore pongs, return text/binary.
+        while True:
+            header = self._recv_exact(2)
+            opcode = header[0] & 0x0F
+            length = header[1] & 0x7F
+            if length == 126:
+                length = struct.unpack(">H", self._recv_exact(2))[0]
+            elif length == 127:
+                length = struct.unpack(">Q", self._recv_exact(8))[0]
+            payload = self._recv_exact(length)
+            if opcode == 8:
+                raise RuntimeError("websocket closed by peer")
+            if opcode == 9:  # ping -> must reply with a masked pong
+                self._send_ctl(0x8A, payload)
+                continue
+            if opcode == 10:  # unsolicited pong — ignore
+                continue
+            return payload
+
+    def _send_ctl(self, first_byte, payload):
+        frame = bytearray([first_byte])
+        n = len(payload)
+        frame.append(0x80 | n)
+        mask = os.urandom(4)
+        frame += mask
+        frame += bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        self.sock.sendall(bytes(frame))
 
     def _recv_exact(self, n):
         buf = b""
